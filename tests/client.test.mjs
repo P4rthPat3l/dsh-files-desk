@@ -4,8 +4,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { addressFor, canEditAddress, parseAddress } from '../src/client/api.js';
-import { EN, ZH } from '../src/client/locale.js';
+import { addressFor, canEditAddress, parseAddress } from '../src/client/api.ts';
+import { EN, ZH } from '../src/client/locale.ts';
 
 const require = createRequire(import.meta.url);
 const here = path.dirname(fileURLToPath(import.meta.url));

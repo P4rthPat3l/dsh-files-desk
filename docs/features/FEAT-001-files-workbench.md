@@ -158,11 +158,11 @@ flowchart TD
 
 | Step | Status | Controlling component | Failure behavior |
 | --- | --- | --- | --- |
-| Admission | Planned | `lib/http.js` via `ctx.connection.admit` | 401 or forbidden envelope |
-| Workspace resolution | Planned | `lib/rpc.js` via `ctx.workspaceRegistry` | `files/no-workspace` |
-| Containment | Planned | `lib/paths.js` | `files/outside-workspace` |
-| Version check | Planned | `lib/ops.js` | `files/conflict`, file untouched |
-| Atomic write | Planned | `lib/ops.js` | Temp removed, original untouched |
+| Admission | Planned | `src/host/lib/http.ts` via `ctx.connection.admit` | 401 or forbidden envelope |
+| Workspace resolution | Planned | `src/host/lib/rpc.ts` via `ctx.workspaceRegistry` | `files/no-workspace` |
+| Containment | Planned | `src/host/lib/paths.ts` | `files/outside-workspace` |
+| Version check | Planned | `src/host/lib/ops.ts` | `files/conflict`, file untouched |
+| Atomic write | Planned | `src/host/lib/ops.ts` | Temp removed, original untouched |
 
 ## 9. Data Flow
 
@@ -218,12 +218,12 @@ The feature is new, so this repository has no pre-existing implementation paths.
 | Layer | Responsibility | Path | Main symbol | Status |
 | --- | --- | --- | --- | --- |
 | Bundle manifest | Package metadata, patch, client injection | `package.json`, `cordis.patch.yml` | bundle row `dsh-files-desk` | Inferred |
-| Host entry | Route registration | `index.js` | `apply` | Inferred |
-| Host route | Authenticated envelope and dispatch | `lib/http.js`, `lib/rpc.js` | `registerFilesRoute`, `createHandler` | Inferred |
-| Host operations | Versioned read, write, and file operations | `lib/ops.js`, `lib/paths.js`, `lib/errors.js` | `readText`, `writeText`, `renameEntry` | Inferred |
+| Host entry | Route registration | `src/host/index.ts` | `apply` | Inferred |
+| Host route | Authenticated envelope and dispatch | `src/host/lib/http.ts`, `src/host/lib/rpc.ts` | `registerFilesRoute`, `createHandler` | Inferred |
+| Host operations | Versioned read, write, and file operations | `src/host/lib/ops.ts`, `src/host/lib/paths.ts`, `src/host/lib/errors.ts` | `readText`, `writeText`, `renameEntry` | Inferred |
 | Client bundle | Tab types, bodies, menus, editor host | `src/client/`, built `client.js` | `apply`, `FilesWorkbench`, `EditorTab` | Inferred |
-| Editor chunk | CodeMirror and languages, lazy loaded | `src/client/editor/entry.js`, built `client.editor.js` | `createEditor` | Inferred |
-| Error boundary | Keeps a render failure inside the pane | `src/client/boundary.jsx` | `SurfaceBoundary` | Inferred |
+| Editor chunk | CodeMirror and languages, lazy loaded | `src/client/editor/entry.ts`, built `client.editor.js` | `createEditor` | Inferred |
+| Error boundary | Keeps a render failure inside the pane | `src/client/boundary.tsx` | `SurfaceBoundary` | Inferred |
 | Build | esbuild wrapper for the module loader | `scripts/build.mjs` | build script | Inferred |
 | Tests | Host rules, HTTP envelope, client, editor, menus | `tests/` | `host.test.mjs`, `http.test.mjs`, `client.test.mjs`, `editor.test.mjs`, `workbench.test.mjs` | Inferred |
 | Git integration | Open at line from a diff | `dsh-git/client.js` (separate repository) | `fileAddressFor`, `onOpen` | Inferred |
@@ -233,6 +233,7 @@ The feature is new, so this repository has no pre-existing implementation paths.
 | Path or area | Classification | Rule |
 | --- | --- | --- |
 | `client.js`, `client.editor.js` | Generated | Built by `scripts/build.mjs`; never edit by hand |
+| `dist/` | Generated | Compiled from `src/host/` and `src/contract.ts` by `tsc`; never edit by hand |
 | `node_modules/` | Generated | Installed from `package.json` |
 | `docs/features/` | Restricted | Update in the same change as behavior |
 
@@ -306,17 +307,17 @@ Page params: `{ path?: string, line?: number }`. Resource params: `{ line?: numb
 
 | Rule ID | Status | Rule | Enforcement point | Test reference |
 | --- | --- | --- | --- | --- |
-| BR-001 | Inferred | Every write is confined to the workspace root | `lib/paths.js` | `tests/host.test.mjs` |
-| BR-002 | Inferred | A save with a stale version is refused and the file is untouched | `lib/ops.js` | `tests/host.test.mjs` |
-| BR-003 | Inferred | A save writes a temp file and renames it, preserving mode | `lib/ops.js` | `tests/host.test.mjs` |
-| BR-004 | Inferred | Symlinks that resolve outside the root are refused for writes | `lib/paths.js` | `tests/host.test.mjs` |
-| BR-005 | Inferred | Rename and copy never overwrite an existing target | `lib/ops.js` | `tests/host.test.mjs` |
-| BR-006 | Inferred | Delete requires a confirmation and refuses the workspace root | Client dialog, `lib/ops.js` | `tests/host.test.mjs`; confirmation untested live |
-| BR-007 | Inferred | Binary, non-UTF-8, and over-5-MB files are not opened in the editor | `lib/ops.js` | `tests/host.test.mjs` |
-| BR-008 | Inferred | Only an owner peer reaches a handler | `lib/http.js` | `tests/http.test.mjs` |
-| BR-009 | Inferred | CRLF line endings round-trip, so saving does not rewrite the file | `lib/ops.js` | `tests/host.test.mjs` |
+| BR-001 | Inferred | Every write is confined to the workspace root | `src/host/lib/paths.ts` | `tests/host.test.mjs` |
+| BR-002 | Inferred | A save with a stale version is refused and the file is untouched | `src/host/lib/ops.ts` | `tests/host.test.mjs` |
+| BR-003 | Inferred | A save writes a temp file and renames it, preserving mode | `src/host/lib/ops.ts` | `tests/host.test.mjs` |
+| BR-004 | Inferred | Symlinks that resolve outside the root are refused for writes | `src/host/lib/paths.ts` | `tests/host.test.mjs` |
+| BR-005 | Inferred | Rename and copy never overwrite an existing target | `src/host/lib/ops.ts` | `tests/host.test.mjs` |
+| BR-006 | Inferred | Delete requires a confirmation and refuses the workspace root | Client dialog, `src/host/lib/ops.ts` | `tests/host.test.mjs`; confirmation untested live |
+| BR-007 | Inferred | Binary, non-UTF-8, and over-5-MB files are not opened in the editor | `src/host/lib/ops.ts` | `tests/host.test.mjs` |
+| BR-008 | Inferred | Only an owner peer reaches a handler | `src/host/lib/http.ts` | `tests/http.test.mjs` |
+| BR-009 | Inferred | CRLF line endings round-trip, so saving does not rewrite the file | `src/host/lib/ops.ts` | `tests/host.test.mjs` |
 | BR-010 | Inferred | Text addresses open the editor; images, PDF, Office, and archives open the preview | `canOpen` allowlist | `tests/client.test.mjs` |
-| BR-011 | Inferred | A dirty buffer never reloads silently after an external change | `src/client/editor-host.jsx` | Untested live |
+| BR-011 | Inferred | A dirty buffer never reloads silently after an external change | `src/client/editor-host.tsx` | Untested live |
 | BR-012 | Inferred | Uninstalling the plugin restores the built-in Files tab | Tab registry | Untested live |
 
 ## 15. Acceptance Criteria
@@ -472,7 +473,7 @@ A failed operation never leaves partial state: writes are temp-and-rename, and c
 | SEC-003 | Reads outside the workspace are read-only | `read` and `stat` allow them; every mutation refuses | Host test |
 | SEC-004 | File contents are never logged or sent to a model | Route code has no logging and no LLM call | Code review |
 | SEC-005 | Request bodies are bounded | 16 MB cap in the route | HTTP test |
-| SEC-006 | Deleting the workspace root is impossible | Explicit refusal in `lib/ops.js` | Host test |
+| SEC-006 | Deleting the workspace root is impossible | Explicit refusal in `src/host/lib/ops.ts` | Host test |
 
 ## 18. Accessibility and Localization
 
@@ -555,7 +556,7 @@ No profile configuration. The wrap and autosave preferences live in `localStorag
 
 ### Phase 1: Host route and operations
 
-- **Changes:** `lib/errors.js`, `lib/paths.js`, `lib/ops.js`, `lib/rpc.js`, `lib/http.js`, `index.js`.
+- **Changes:** `src/host/lib/errors.ts`, `src/host/lib/paths.ts`, `src/host/lib/ops.ts`, `src/host/lib/rpc.ts`, `src/host/lib/http.ts`, `src/host/index.ts`.
 - **Validation:** `npm test` host suite.
 - **Done when:** every operation passes containment, version, and atomicity tests.
 
@@ -567,7 +568,7 @@ No profile configuration. The wrap and autosave preferences live in `localStorag
 
 ### Phase 3: Workbench page and takeover
 
-- **Changes:** `src/client/workbench.js`, store, styles, locale.
+- **Changes:** `src/client/workbench.tsx`, store, styles, locale.
 - **Validation:** client smoke test; live reload.
 - **Done when:** Mod+P opens the workbench and a file edits and saves.
 
@@ -641,6 +642,7 @@ The plugin is a local package linked into the `web` profile. Deployment is `plug
 | Date | Version | Change | Status | PR or author |
 | --- | --- | --- | --- | --- |
 | 2026-11-10 | 0.1.0 | Host route, file operations, workbench, editor chunk, menus, and Git open-at-line implemented; 33 tests pass; live pass found and fixed the breadcrumb slash and the Git handler scope | Shipped and live verified (no commit) | Parth Patel |
+| 2026-11-10 | 0.2.0 | Sources moved to TypeScript: `src/host/` compiles to `dist/` with `tsc`, the shared wire contract lives in `src/contract.ts`, and the client keeps its esbuild bundle; `npm run typecheck` added | Implemented, 33 tests pass | Parth Patel |
 
 ## 31. Related Resources
 

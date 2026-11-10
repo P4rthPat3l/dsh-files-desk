@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { FilesError } from './errors.js';
+import type { BigIntStats } from 'node:fs';
+import { FilesError, isErrno } from './errors.js';
 import {
   MAX_COPY_ENTRIES,
   MAX_ENTRIES,
@@ -11,14 +12,24 @@ import {
   versionOf,
 } from './paths.js';
 
+import type {
+  DirectoryEntry,
+  DirectoryListing,
+  Eol,
+  EntryKind,
+  FileStat,
+  TextFile,
+  WrittenFile,
+} from '../../contract.js';
+
 const decoder = new TextDecoder('utf-8', { fatal: true });
 
 /**
  * Split a decoded file into editor text and its line ending style.
- * @param {string} text - the decoded text.
- * @returns {{ text: string, eol: 'lf' | 'crlf' }} normalized text and style.
+ * @param text the decoded text.
+ * @returns normalized text and its style.
  */
-function splitEol(text) {
+function splitEol(text: string): { text: string; eol: Eol } {
   if (!text.includes('\r\n')) return { text, eol: 'lf' };
   const withoutCrlf = text.replace(/\r\n/g, '');
   if (withoutCrlf.includes('\n')) return { text: text.replace(/\r\n/g, '\n'), eol: 'lf' };
@@ -27,11 +38,11 @@ function splitEol(text) {
 
 /**
  * Read one UTF-8 text file with a version that a save can compare against.
- * @param {string} root - the registered workspace path.
- * @param {string} candidate - absolute or workspace-relative path.
- * @returns {Promise<{ path: string, text: string, version: string, size: number, eol: 'lf' | 'crlf', bom: boolean }>}
+ * @param root the registered workspace path.
+ * @param candidate absolute or workspace-relative path.
+ * @returns the file content and its version.
  */
-export async function readText(root, candidate) {
+export async function readText(root: string, candidate: string): Promise<TextFile> {
   const { absolute } = await readable(root, candidate);
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const before = await fs.stat(absolute, { bigint: true });
@@ -44,7 +55,7 @@ export async function readText(root, candidate) {
     if (buffer.subarray(0, 8192).includes(0)) {
       throw new FilesError('files/binary', 'Binary files cannot be edited here.', { path: candidate });
     }
-    let decoded;
+    let decoded: string;
     try {
       decoded = decoder.decode(buffer);
     } catch {
@@ -67,15 +78,22 @@ export async function readText(root, candidate) {
 
 /**
  * Write one text file atomically, only when its version still matches.
- * @param {string} root - the registered workspace path.
- * @param {string} candidate - absolute or workspace-relative path.
- * @param {string} text - normalized text with `\n` line endings.
- * @param {string} expectedVersion - the version the editor read.
- * @param {'lf' | 'crlf'} [eol] - the file's line ending style.
- * @param {boolean} [bom] - whether the file starts with a UTF-8 BOM.
- * @returns {Promise<{ path: string, version: string, size: number }>}
+ * @param root the registered workspace path.
+ * @param candidate absolute or workspace-relative path.
+ * @param text normalized text with `\n` line endings.
+ * @param expectedVersion the version the editor read.
+ * @param eol the file's line ending style.
+ * @param bom whether the file starts with a UTF-8 BOM.
+ * @returns the file's new version.
  */
-export async function writeText(root, candidate, text, expectedVersion, eol = 'lf', bom = false) {
+export async function writeText(
+  root: string,
+  candidate: string,
+  text: string,
+  expectedVersion: string,
+  eol: Eol = 'lf',
+  bom = false,
+): Promise<WrittenFile> {
   const bytes = Buffer.byteLength(text, 'utf8');
   if (bytes > MAX_TEXT_BYTES) {
     throw new FilesError('files/too-large', 'The file is too large to save here.', { path: candidate });
@@ -111,28 +129,26 @@ export async function writeText(root, candidate, text, expectedVersion, eol = 'l
 
 /**
  * Create one file or directory. The parent must exist; the name must be free.
- * @param {string} root - the registered workspace path.
- * @param {string} candidate - absolute or workspace-relative path.
- * @param {'file' | 'directory'} kind - the entry to create.
- * @returns {Promise<{ path: string }>}
+ * @param root the registered workspace path.
+ * @param candidate absolute or workspace-relative path.
+ * @param kind the entry to create.
+ * @returns the created path.
  */
-export async function createEntry(root, candidate, kind) {
-  if (kind !== 'file' && kind !== 'directory') {
-    throw new FilesError('files/bad-request', 'Unknown entry kind.', { kind });
-  }
+export async function createEntry(root: string, candidate: string, kind: EntryKind): Promise<{ path: string }> {
   const entry = await inside(root, candidate);
-  if (entry.absolute === entry.root) {
-    throw new FilesError('files/exists', 'That name already exists.', { path: candidate });
-  }
-  if (entry.exists) {
+  if (entry.absolute === entry.root || entry.exists) {
     throw new FilesError('files/exists', 'That name already exists.', { path: candidate });
   }
   try {
     if (kind === 'file') await fs.writeFile(entry.absolute, '', { encoding: 'utf8', flag: 'wx' });
     else await fs.mkdir(entry.absolute);
   } catch (error) {
-    if (error.code === 'EEXIST') throw new FilesError('files/exists', 'That name already exists.', { path: candidate });
-    if (error.code === 'ENOENT') throw new FilesError('files/not-found', 'The parent folder does not exist.', { path: candidate });
+    if (isErrno(error, 'EEXIST')) {
+      throw new FilesError('files/exists', 'That name already exists.', { path: candidate });
+    }
+    if (isErrno(error, 'ENOENT')) {
+      throw new FilesError('files/not-found', 'The parent folder does not exist.', { path: candidate });
+    }
     throw error;
   }
   return { path: entry.absolute };
@@ -140,22 +156,21 @@ export async function createEntry(root, candidate, kind) {
 
 /**
  * Rename or move one entry. The target must not exist.
- * @param {string} root - the registered workspace path.
- * @param {string} from - the current path.
- * @param {string} to - the new path.
- * @returns {Promise<{ path: string, from: string }>}
+ * @param root the registered workspace path.
+ * @param from the current path.
+ * @param to the new path.
+ * @returns the new path.
  */
-export async function renameEntry(root, from, to) {
+export async function renameEntry(root: string, from: string, to: string): Promise<{ path: string; from: string }> {
   const source = await inside(root, from);
   if (!source.exists) throw new FilesError('files/not-found', 'The entry no longer exists.', { path: from });
   if (source.absolute === source.root) {
     throw new FilesError('files/bad-request', 'The workspace root cannot be renamed.', { path: from });
   }
   const target = await inside(root, to);
-  if (target.absolute === target.root) {
+  if (target.absolute === target.root || target.exists) {
     throw new FilesError('files/exists', 'That name already exists.', { path: to });
   }
-  if (target.exists) throw new FilesError('files/exists', 'That name already exists.', { path: to });
   if (target.absolute === source.absolute) {
     throw new FilesError('files/exists', 'The name is unchanged.', { path: to });
   }
@@ -165,7 +180,7 @@ export async function renameEntry(root, from, to) {
   try {
     await fs.rename(source.absolute, target.absolute);
   } catch (error) {
-    if (error.code === 'ENOTEMPTY' || error.code === 'EISDIR' || error.code === 'ENOTDIR') {
+    if (isErrno(error, 'ENOTEMPTY') || isErrno(error, 'EISDIR') || isErrno(error, 'ENOTDIR')) {
       throw new FilesError('files/exists', 'That name already exists.', { path: to });
     }
     throw error;
@@ -175,12 +190,12 @@ export async function renameEntry(root, from, to) {
 
 /**
  * Copy one file or directory tree. The target must not exist.
- * @param {string} root - the registered workspace path.
- * @param {string} from - the source path.
- * @param {string} to - the target path.
- * @returns {Promise<{ path: string }>}
+ * @param root the registered workspace path.
+ * @param from the source path.
+ * @param to the target path.
+ * @returns the copied path.
  */
-export async function copyEntry(root, from, to) {
+export async function copyEntry(root: string, from: string, to: string): Promise<{ path: string }> {
   const source = await inside(root, from);
   if (!source.exists) throw new FilesError('files/not-found', 'The entry no longer exists.', { path: from });
   const target = await inside(root, to);
@@ -200,11 +215,11 @@ export async function copyEntry(root, from, to) {
 
 /**
  * Copy one node and, for a directory, its children.
- * @param {string} source - absolute source path.
- * @param {string} target - absolute target path.
- * @param {{ count: number }} counter - entries created so far.
+ * @param source absolute source path.
+ * @param target absolute target path.
+ * @param counter entries created so far.
  */
-async function copyNode(source, target, counter) {
+async function copyNode(source: string, target: string, counter: { count: number }): Promise<void> {
   counter.count += 1;
   if (counter.count > MAX_COPY_ENTRIES) {
     throw new FilesError('files/too-many-entries', 'The folder has too many entries to copy.');
@@ -230,11 +245,11 @@ async function copyNode(source, target, counter) {
 
 /**
  * Delete one file or directory tree. The workspace root is refused.
- * @param {string} root - the registered workspace path.
- * @param {string} candidate - absolute or workspace-relative path.
- * @returns {Promise<{ path: string }>}
+ * @param root the registered workspace path.
+ * @param candidate absolute or workspace-relative path.
+ * @returns the deleted path.
  */
-export async function removeEntry(root, candidate) {
+export async function removeEntry(root: string, candidate: string): Promise<{ path: string }> {
   const entry = await inside(root, candidate);
   if (!entry.exists) throw new FilesError('files/not-found', 'The entry no longer exists.', { path: candidate });
   if (entry.absolute === entry.root) {
@@ -248,13 +263,13 @@ export async function removeEntry(root, candidate) {
 
 /**
  * Report one file's current version without its content.
- * @param {string} root - the registered workspace path.
- * @param {string} candidate - absolute or workspace-relative path.
- * @returns {Promise<{ path: string, version: string, size: number, mtimeMs: number }>}
+ * @param root the registered workspace path.
+ * @param candidate absolute or workspace-relative path.
+ * @returns the file state.
  */
-export async function statEntry(root, candidate) {
+export async function statEntry(root: string, candidate: string): Promise<FileStat> {
   const { absolute } = await readable(root, candidate);
-  const stat = await fs.stat(absolute, { bigint: true });
+  const stat: BigIntStats = await fs.stat(absolute, { bigint: true });
   return {
     path: absolute,
     version: versionOf(stat),
@@ -266,24 +281,24 @@ export async function statEntry(root, candidate) {
 /**
  * List one directory's direct children. Types are `directory`, `file`, or `other`
  * (a symlink or a special file, which the editor does not open).
- * @param {string} root - the registered workspace path.
- * @param {string} candidate - absolute or workspace-relative directory path.
- * @returns {Promise<{ path: string, entries: Array<{ name: string, type: string, size?: number }>, truncated: boolean }>}
+ * @param root the registered workspace path.
+ * @param candidate absolute or workspace-relative directory path.
+ * @returns the listing.
  */
-export async function listDirectory(root, candidate) {
+export async function listDirectory(root: string, candidate: string): Promise<DirectoryListing> {
   const entry = await inside(root, candidate === '' ? root : candidate);
   if (!entry.exists) throw new FilesError('files/not-found', 'The folder no longer exists.', { path: candidate });
   if (!entry.stat.isDirectory()) throw new FilesError('files/not-directory', 'Not a folder.', { path: candidate });
   const dirents = await fs.readdir(entry.absolute, { withFileTypes: true });
-  const entries = [];
+  const entries: DirectoryEntry[] = [];
   for (const dirent of dirents.slice(0, MAX_ENTRIES)) {
-    let size;
+    let size: number | undefined;
     try {
       size = (await fs.lstat(path.join(entry.absolute, dirent.name))).size;
     } catch {
       size = undefined;
     }
-    const type = dirent.isDirectory() ? 'directory' : dirent.isFile() ? 'file' : 'other';
+    const type: DirectoryEntry['type'] = dirent.isDirectory() ? 'directory' : dirent.isFile() ? 'file' : 'other';
     entries.push({ name: dirent.name, type, size });
   }
   return { path: entry.absolute, entries, truncated: dirents.length > MAX_ENTRIES };

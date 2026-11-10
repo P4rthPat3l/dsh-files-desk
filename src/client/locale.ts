@@ -1,4 +1,6 @@
-export const EN = {
+import type { Translator } from './harness.js';
+
+export const EN: Record<string, string> = {
   panel: 'Files',
   'guide.title': 'Files and editor',
   'guide.description': 'Browse, edit, and manage workspace files.',
@@ -81,7 +83,7 @@ export const EN = {
   'dialog.ok': 'OK',
 };
 
-export const ZH = {
+export const ZH: Record<string, string> = {
   panel: '文件',
   'guide.title': '文件与编辑器',
   'guide.description': '浏览、编辑和管理工作区文件。',
@@ -164,22 +166,22 @@ export const ZH = {
   'dialog.ok': '确定',
 };
 
-let bound = null;
+let bound: Translator | null = null;
 
 /**
  * Replace the translator used outside React.
- * @param {(key: string, values?: Record<string, string | number>) => string} translate - the bound translator.
+ * @param translate the bound translator.
  */
-export function setTranslator(translate) {
+export function setTranslator(translate: Translator): void {
   bound = translate;
 }
 
 /**
  * Translate one key for code that runs outside a slot.
- * @param {string} key - the dictionary key.
- * @param {Record<string, string | number>} [values] - interpolation values.
- * @returns {string} the translated string.
+ * @param key the dictionary key.
+ * @param values interpolation values.
+ * @returns the translated string.
  */
-export function tr(key, values) {
+export function tr(key: string, values?: Record<string, string | number>): string {
   return bound === null ? key : bound(key, values);
 }

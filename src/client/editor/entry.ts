@@ -1,7 +1,9 @@
 import { EditorState, StateEffect, StateField } from '@codemirror/state';
+import type { Extension } from '@codemirror/state';
 import {
-  EditorView,
   Decoration,
+  EditorView,
+  crosshairCursor,
   drawSelection,
   dropCursor,
   highlightActiveLine,
@@ -9,13 +11,13 @@ import {
   keymap,
   lineNumbers,
   rectangularSelection,
-  crosshairCursor,
 } from '@codemirror/view';
+import type { DecorationSet, KeyBinding } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import {
+  HighlightStyle,
   bracketMatching,
   foldGutter,
-  HighlightStyle,
   indentOnInput,
   syntaxHighlighting,
 } from '@codemirror/language';
@@ -35,10 +37,46 @@ import { cpp } from '@codemirror/lang-cpp';
 import { rust } from '@codemirror/lang-rust';
 import { go } from '@codemirror/lang-go';
 import { php } from '@codemirror/lang-php';
+import type { LanguageKey } from '../api.js';
 
-const landingEffect = StateEffect.define();
+/** A 1-based line and column in the document. */
+export interface CursorPosition {
+  line: number;
+  column: number;
+}
 
-const landingField = StateField.define({
+/** Creation options for one editor view. */
+export interface CreateEditorOptions {
+  parent: HTMLElement;
+  doc: string;
+  language?: LanguageKey;
+  readOnly?: boolean;
+  wrap?: boolean;
+  tabSize?: number;
+  line?: number;
+  onChange?: (text: string) => void;
+  onCursor?: (position: CursorPosition) => void;
+  onSave?: () => void;
+}
+
+/** The handle the host keeps for one editor view. */
+export interface EditorHandle {
+  view: EditorView;
+  getText: () => string;
+  setText: (text: string) => void;
+  revealLine: (line: number) => void;
+  focus: () => void;
+  destroy: () => void;
+}
+
+/** The chunk this module exports to the host. */
+export interface EditorChunk {
+  createEditor: (options: CreateEditorOptions) => EditorHandle;
+}
+
+const landingEffect = StateEffect.define<number | null>();
+
+const landingField = StateField.define<DecorationSet>({
   create: () => Decoration.none,
   update(value, transaction) {
     for (const effect of transaction.effects) {
@@ -58,7 +96,10 @@ const highlightStyle = HighlightStyle.define([
   { tag: [tags.string, tags.special(tags.string), tags.regexp], class: 'fdp-tok-string' },
   { tag: [tags.number, tags.bool, tags.null], class: 'fdp-tok-number' },
   { tag: [tags.comment, tags.lineComment, tags.blockComment, tags.docComment], class: 'fdp-tok-comment' },
-  { tag: [tags.function(tags.variableName), tags.function(tags.propertyName), tags.macroName], class: 'fdp-tok-function' },
+  {
+    tag: [tags.function(tags.variableName), tags.function(tags.propertyName), tags.macroName],
+    class: 'fdp-tok-function',
+  },
   { tag: [tags.typeName, tags.className, tags.namespace, tags.definitionKeyword], class: 'fdp-tok-type' },
   { tag: [tags.variableName, tags.propertyName, tags.attributeName], class: 'fdp-tok-variable' },
   { tag: [tags.operator, tags.punctuation, tags.separator], class: 'fdp-tok-operator' },
@@ -70,73 +111,76 @@ const highlightStyle = HighlightStyle.define([
   { tag: tags.strong, class: 'fdp-tok-strong' },
 ]);
 
-const theme = EditorView.theme({
-  '&': {
-    height: '100%',
-    backgroundColor: 'transparent',
-    color: 'var(--dsw-alias-label-primary)',
+const theme = EditorView.theme(
+  {
+    '&': {
+      height: '100%',
+      backgroundColor: 'transparent',
+      color: 'var(--dsw-alias-label-primary)',
+    },
+    '&.cm-focused': { outline: 'none' },
+    '.cm-scroller': {
+      fontFamily: 'var(--fdp-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace)',
+      fontSize: 'var(--fdp-font-size, 13px)',
+      lineHeight: '1.55',
+      overflow: 'auto',
+    },
+    '.cm-content': {
+      padding: '8px 0 24px',
+      caretColor: 'var(--dsw-alias-label-primary)',
+    },
+    '.cm-gutters': {
+      backgroundColor: 'transparent',
+      color: 'var(--dsw-alias-label-tertiary, var(--dsw-alias-label-secondary))',
+      border: 'none',
+    },
+    '.cm-lineNumbers .cm-gutterElement': {
+      padding: '0 8px 0 6px',
+      minWidth: '34px',
+    },
+    '.cm-activeLine': {
+      backgroundColor: 'color-mix(in srgb, var(--dsw-alias-label-primary) 5%, transparent)',
+    },
+    '.cm-activeLineGutter': {
+      backgroundColor: 'transparent',
+      color: 'var(--dsw-alias-label-primary)',
+    },
+    '.cm-selectionBackground, &.cm-focused .cm-selectionBackground': {
+      backgroundColor: 'color-mix(in srgb, var(--dsw-alias-brand-primary) 22%, transparent)',
+    },
+    '.cm-cursor, .cm-dropCursor': {
+      borderLeftColor: 'var(--dsw-alias-label-primary)',
+    },
+    '.cm-foldPlaceholder': {
+      backgroundColor: 'var(--dsw-alias-bg-layer-2)',
+      border: 'none',
+      color: 'var(--dsw-alias-label-secondary)',
+    },
+    '.cm-panels': {
+      backgroundColor: 'var(--dsw-alias-bg-layer-2)',
+      color: 'var(--dsw-alias-label-primary)',
+    },
+    '.cm-panels.cm-panels-top': { borderBottom: '1px solid var(--dsw-alias-border-l1)' },
+    '.cm-searchMatch': {
+      backgroundColor: 'color-mix(in srgb, var(--dsw-alias-state-warn-primary) 24%, transparent)',
+      outline: '1px solid var(--dsw-alias-state-warn-primary)',
+    },
+    '.cm-searchMatch.cm-searchMatch-selected': {
+      backgroundColor: 'color-mix(in srgb, var(--dsw-alias-state-warn-primary) 40%, transparent)',
+    },
+    '.cm-matchingBracket': {
+      backgroundColor: 'color-mix(in srgb, var(--dsw-alias-brand-primary) 20%, transparent)',
+      outline: 'none',
+    },
+    '.fdp-landing': {
+      backgroundColor: 'color-mix(in srgb, var(--dsw-alias-brand-primary) 16%, transparent)',
+      transition: 'background-color 1.4s ease',
+    },
   },
-  '&.cm-focused': { outline: 'none' },
-  '.cm-scroller': {
-    fontFamily: 'var(--fdp-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace)',
-    fontSize: 'var(--fdp-font-size, 13px)',
-    lineHeight: '1.55',
-    overflow: 'auto',
-  },
-  '.cm-content': {
-    padding: '8px 0 24px',
-    caretColor: 'var(--dsw-alias-label-primary)',
-  },
-  '.cm-gutters': {
-    backgroundColor: 'transparent',
-    color: 'var(--dsw-alias-label-tertiary, var(--dsw-alias-label-secondary))',
-    border: 'none',
-  },
-  '.cm-lineNumbers .cm-gutterElement': {
-    padding: '0 8px 0 6px',
-    minWidth: '34px',
-  },
-  '.cm-activeLine': {
-    backgroundColor: 'color-mix(in srgb, var(--dsw-alias-label-primary) 5%, transparent)',
-  },
-  '.cm-activeLineGutter': {
-    backgroundColor: 'transparent',
-    color: 'var(--dsw-alias-label-primary)',
-  },
-  '.cm-selectionBackground, &.cm-focused .cm-selectionBackground': {
-    backgroundColor: 'color-mix(in srgb, var(--dsw-alias-brand-primary) 22%, transparent)',
-  },
-  '.cm-cursor, .cm-dropCursor': {
-    borderLeftColor: 'var(--dsw-alias-label-primary)',
-  },
-  '.cm-foldPlaceholder': {
-    backgroundColor: 'var(--dsw-alias-bg-layer-2)',
-    border: 'none',
-    color: 'var(--dsw-alias-label-secondary)',
-  },
-  '.cm-panels': {
-    backgroundColor: 'var(--dsw-alias-bg-layer-2)',
-    color: 'var(--dsw-alias-label-primary)',
-  },
-  '.cm-panels.cm-panels-top': { borderBottom: '1px solid var(--dsw-alias-border-l1)' },
-  '.cm-searchMatch': {
-    backgroundColor: 'color-mix(in srgb, var(--dsw-alias-state-warn-primary) 24%, transparent)',
-    outline: '1px solid var(--dsw-alias-state-warn-primary)',
-  },
-  '.cm-searchMatch.cm-searchMatch-selected': {
-    backgroundColor: 'color-mix(in srgb, var(--dsw-alias-state-warn-primary) 40%, transparent)',
-  },
-  '.cm-matchingBracket': {
-    backgroundColor: 'color-mix(in srgb, var(--dsw-alias-brand-primary) 20%, transparent)',
-    outline: 'none',
-  },
-  '.fdp-landing': {
-    backgroundColor: 'color-mix(in srgb, var(--dsw-alias-brand-primary) 16%, transparent)',
-    transition: 'background-color 1.4s ease',
-  },
-}, { dark: false });
+  { dark: false },
+);
 
-const LANGUAGE_EXTENSIONS = {
+const LANGUAGE_EXTENSIONS: Record<LanguageKey, () => Extension> = {
   javascript: () => javascript(),
   typescript: () => javascript({ typescript: true }),
   jsx: () => javascript({ jsx: true }),
@@ -159,10 +203,10 @@ const LANGUAGE_EXTENSIONS = {
 
 /**
  * Read the 1-based line and column of the main cursor.
- * @param {EditorState} state - the current state.
- * @returns {{ line: number, column: number }} the position.
+ * @param state the current state.
+ * @returns the position.
  */
-function cursorOf(state) {
+function cursorOf(state: EditorState): CursorPosition {
   const head = state.selection.main.head;
   const line = state.doc.lineAt(head);
   return { line: line.number, column: head - line.from + 1 };
@@ -170,23 +214,13 @@ function cursorOf(state) {
 
 /**
  * Create one editor view.
- * @param {object} options - creation options.
- * @param {HTMLElement} options.parent - the container.
- * @param {string} options.doc - initial text.
- * @param {string} [options.language] - the language key.
- * @param {boolean} [options.readOnly] - whether editing is disabled.
- * @param {boolean} [options.wrap] - whether long lines wrap.
- * @param {number} [options.tabSize] - the tab width.
- * @param {number} [options.line] - a 1-based line to reveal.
- * @param {(text: string) => void} [options.onChange] - document change callback.
- * @param {(position: { line: number, column: number }) => void} [options.onCursor] - cursor callback.
- * @param {() => void} [options.onSave] - Ctrl+S callback.
- * @returns {object} the editor handle.
+ * @param options creation options.
+ * @returns the editor handle.
  */
-export function createEditor(options) {
-  const language = LANGUAGE_EXTENSIONS[options.language ?? 'text'] ?? LANGUAGE_EXTENSIONS.text;
-  let landingTimer;
-  const saveKey = {
+export function createEditor(options: CreateEditorOptions): EditorHandle {
+  const language = LANGUAGE_EXTENSIONS[options.language ?? 'text'];
+  let landingTimer: ReturnType<typeof setTimeout> | undefined;
+  const saveKey: KeyBinding = {
     key: 'Mod-s',
     preventDefault: true,
     run: () => {
@@ -194,7 +228,7 @@ export function createEditor(options) {
       return true;
     },
   };
-  const findKey = {
+  const findKey: KeyBinding = {
     key: 'Mod-f',
     preventDefault: true,
     run: (view) => {
@@ -228,16 +262,14 @@ export function createEditor(options) {
         }),
         theme,
         options.wrap === true ? EditorView.lineWrapping : [],
-        options.readOnly === true
-          ? [EditorState.readOnly.of(true), EditorView.editable.of(false)]
-          : [],
+        options.readOnly === true ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : [],
         EditorState.tabSize.of(Math.max(1, options.tabSize ?? 2)),
         language(),
       ],
     }),
   });
 
-  function revealLine(lineNumber) {
+  function revealLine(lineNumber: number): void {
     const total = view.state.doc.lines;
     const line = view.state.doc.line(Math.min(Math.max(1, lineNumber), total));
     view.dispatch({
@@ -251,14 +283,15 @@ export function createEditor(options) {
     }, 1600);
   }
 
-  if (typeof options.line === 'number' && options.line > 0) {
-    requestAnimationFrame(() => revealLine(options.line));
+  const initialLine = options.line;
+  if (typeof initialLine === 'number' && initialLine > 0) {
+    requestAnimationFrame(() => revealLine(initialLine));
   }
 
   return {
     view,
     getText: () => view.state.doc.toString(),
-    setText(text) {
+    setText(text: string): void {
       view.dispatch({
         changes: { from: 0, to: view.state.doc.length, insert: text },
         selection: { anchor: Math.min(view.state.selection.main.anchor, text.length) },
@@ -267,7 +300,7 @@ export function createEditor(options) {
     },
     revealLine,
     focus: () => view.focus(),
-    destroy() {
+    destroy(): void {
       clearTimeout(landingTimer);
       view.destroy();
     },

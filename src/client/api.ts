@@ -1,58 +1,88 @@
+import type { ConnectionService } from './harness.js';
+
 const FILE_PREFIX = 'dsh-resource://file/session/';
 
-let connection = null;
+/** Every endpoint the files channel serves. */
+export type Endpoint = 'list' | 'read' | 'write' | 'create' | 'rename' | 'copy' | 'delete' | 'stat';
+
+/** A failed route call, carrying the host's stable code. */
+export class FilesCallError extends Error {
+  readonly code: string;
+
+  readonly details: Record<string, unknown>;
+
+  constructor(code: string, message: string, details: Record<string, unknown>) {
+    super(message);
+    this.name = 'FilesCallError';
+    this.code = code;
+    this.details = details;
+  }
+}
+
+let connection: ConnectionService | null = null;
 
 /**
  * Bind the client connection used for route calls.
- * @param {{ connection: object }} ctx - the plugin context.
+ * @param ctx the plugin context.
  */
-export function configureConnection(ctx) {
+export function configureConnection(ctx: { connection: ConnectionService }): void {
   connection = ctx.connection;
 }
 
 /**
  * Call one files endpoint.
- * @param {string} endpoint - the endpoint name.
- * @param {object} payload - the endpoint payload.
- * @param {AbortSignal} [signal] - caller cancellation.
- * @returns {Promise<any>} the endpoint value.
+ * @param endpoint the endpoint name.
+ * @param payload the endpoint payload.
+ * @param signal caller cancellation.
+ * @returns the endpoint value.
  */
-export async function call(endpoint, payload, signal) {
+export async function call<T>(endpoint: Endpoint, payload: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
   if (connection === null) throw new Error('The files channel is not ready.');
-  const result = await connection.rpc.call('/files-rpc', endpoint, payload, signal);
-  if (!result.ok) {
-    const error = new Error(result.error.message);
-    error.code = result.error.code;
-    error.details = result.error.details;
-    throw error;
+  const outcome = await connection.rpc.call('/files-rpc', endpoint, payload, signal);
+  if (!outcome.ok) {
+    throw new FilesCallError(outcome.error.code, outcome.error.message, outcome.error.details);
   }
-  return result.value;
+  return outcome.value as T;
+}
+
+/**
+ * Read the stable code from a failed operation.
+ * @param error the thrown value.
+ * @returns the code, or undefined when it did not come from the files channel.
+ */
+export function codeOfFailure(error: unknown): string | undefined {
+  if (error instanceof FilesCallError) return error.code;
+  if (error instanceof Error && 'code' in error) {
+    const { code } = error as { code: unknown };
+    return typeof code === 'string' ? code : undefined;
+  }
+  return undefined;
 }
 
 /**
  * Replace Windows separators with `/`.
- * @param {string} value - a path.
- * @returns {string} the normalized path.
+ * @param value a path.
+ * @returns the normalized path.
  */
-export function normalizePath(value) {
+export function normalizePath(value: string): string {
   return value.replace(/\\/g, '/');
 }
 
 /**
  * Whether a path is absolute in either spelling the host accepts.
- * @param {string} value - a path.
- * @returns {boolean} whether it is absolute.
+ * @param value a path.
+ * @returns whether it is absolute.
  */
-export function isAbsolutePath(value) {
+export function isAbsolutePath(value: string): boolean {
   return value.startsWith('/') || /^[A-Za-z]:\//.test(normalizePath(value)) || normalizePath(value).startsWith('//');
 }
 
 /**
  * The final path segment.
- * @param {string} value - a path.
- * @returns {string} the name.
+ * @param value a path.
+ * @returns the name.
  */
-export function basename(value) {
+export function basename(value: string): string {
   const path = normalizePath(value).replace(/\/+$/, '');
   const index = path.lastIndexOf('/');
   return index < 0 ? path : path.slice(index + 1);
@@ -60,10 +90,10 @@ export function basename(value) {
 
 /**
  * The path without its final segment.
- * @param {string} value - a path.
- * @returns {string} the parent path.
+ * @param value a path.
+ * @returns the parent path.
  */
-export function dirname(value) {
+export function dirname(value: string): string {
   const path = normalizePath(value).replace(/\/+$/, '');
   const index = path.lastIndexOf('/');
   if (index < 0) return '';
@@ -73,32 +103,32 @@ export function dirname(value) {
 
 /**
  * Join one directory and one name with `/`.
- * @param {string} directory - the parent path.
- * @param {string} name - the child name.
- * @returns {string} the joined path.
+ * @param directory the parent path.
+ * @param name the child name.
+ * @returns the joined path.
  */
-export function joinPath(directory, name) {
+export function joinPath(directory: string, name: string): string {
   const base = normalizePath(directory).replace(/\/+$/, '');
   return base === '' ? name : `${base}/${name}`;
 }
 
 /**
  * The tree key of a root: no trailing separator.
- * @param {string} value - the root path.
- * @returns {string} the tree key.
+ * @param value the root path.
+ * @returns the tree key.
  */
-export function treeRoot(value) {
+export function treeRoot(value: string): string {
   const path = normalizePath(value).replace(/\/+$/, '');
   return path === '' ? '/' : path;
 }
 
 /**
  * Whether a path is the root or inside it.
- * @param {string} root - the tree root.
- * @param {string} path - a candidate path.
- * @returns {boolean} containment.
+ * @param root the tree root.
+ * @param path a candidate path.
+ * @returns containment.
  */
-export function isInside(root, path) {
+export function isInside(root: string, path: string): boolean {
   const base = treeRoot(root);
   const candidate = normalizePath(path);
   return candidate === base || candidate.startsWith(`${base}/`);
@@ -106,10 +136,10 @@ export function isInside(root, path) {
 
 /**
  * Encode one path as address segments.
- * @param {string} value - the path.
- * @returns {string} encoded segments.
+ * @param value the path.
+ * @returns encoded segments.
  */
-function encodePath(value) {
+function encodePath(value: string): string {
   return normalizePath(value)
     .replace(/^(?:\.\/)+/, '')
     .split('/')
@@ -119,36 +149,44 @@ function encodePath(value) {
 
 /**
  * Build a session-scoped file address.
- * @param {string} sessionId - the session.
- * @param {string} path - an absolute or root-relative path.
- * @returns {string} the address.
+ * @param sessionId the session.
+ * @param path an absolute or root-relative path.
+ * @returns the address.
  */
-function sessionAddress(sessionId, path) {
+function sessionAddress(sessionId: string, path: string): string {
   return `${FILE_PREFIX}${encodeURIComponent(sessionId)}/${encodePath(path)}`;
 }
 
 /**
  * The address for a path as a caller holds it, matching the harness util.
- * @param {string} sessionId - the session.
- * @param {string | null} cwd - the session working directory.
- * @param {string} path - absolute or workspace-relative path.
- * @returns {string} the address.
+ * @param sessionId the session.
+ * @param cwd the session working directory.
+ * @param path absolute or workspace-relative path.
+ * @returns the address.
  */
-export function addressFor(sessionId, cwd, path) {
+export function addressFor(sessionId: string, cwd: string | null | undefined, path: string): string {
   const normalized = normalizePath(path);
   if (!isAbsolutePath(normalized)) return sessionAddress(sessionId, normalized);
   const root = cwd === null || cwd === undefined ? '' : treeRoot(cwd);
   if (root !== '' && normalized === root) return sessionAddress(sessionId, '');
-  if (root !== '' && normalized.startsWith(`${root}/`)) return sessionAddress(sessionId, normalized.slice(root.length + 1));
+  if (root !== '' && normalized.startsWith(`${root}/`)) {
+    return sessionAddress(sessionId, normalized.slice(root.length + 1));
+  }
   return sessionAddress(sessionId, normalized);
+}
+
+/** One file address split into its parts. */
+export interface ParsedAddress {
+  sessionId: string;
+  path: string;
 }
 
 /**
  * Read a file address into its session and path.
- * @param {string} address - a candidate address.
- * @returns {{ sessionId: string, path: string } | undefined} the parts.
+ * @param address a candidate address.
+ * @returns the parts, or undefined when the address is not a file address.
  */
-export function parseAddress(address) {
+export function parseAddress(address: string | null | undefined): ParsedAddress | undefined {
   if (typeof address !== 'string' || !address.startsWith(FILE_PREFIX)) return undefined;
   const rest = address.slice(FILE_PREFIX.length);
   const slash = rest.indexOf('/');
@@ -203,37 +241,50 @@ const LANGUAGE_BY_EXTENSION = {
   rs: 'rust',
   go: 'go',
   php: 'php',
-};
+} as const;
+
+/** One editor language the highlight packs cover. */
+export type LanguageKey = (typeof LANGUAGE_BY_EXTENSION)[keyof typeof LANGUAGE_BY_EXTENSION] | 'text';
 
 /**
  * The language key for a path.
- * @param {string} path - the file path.
- * @returns {string} the language key.
+ * @param path the file path.
+ * @returns the language key.
  */
-export function languageFor(path) {
+export function languageFor(path: string): LanguageKey {
   const name = basename(path).toLowerCase();
   if (name === 'dockerfile' || name === 'makefile' || name === 'procfile') return 'text';
   const dot = name.lastIndexOf('.');
   if (dot < 0) return 'text';
-  return LANGUAGE_BY_EXTENSION[name.slice(dot + 1)] ?? 'text';
+  return keyOfLanguage(name.slice(dot + 1));
 }
 
-const BINARY_EXTENSIONS = new Set([
+/**
+ * Look one extension up in the language table.
+ * @param extension the extension without its dot.
+ * @returns the language key.
+ */
+function keyOfLanguage(extension: string): LanguageKey {
+  const known: Record<string, LanguageKey> = LANGUAGE_BY_EXTENSION;
+  return known[extension] ?? 'text';
+}
+
+const BINARY_EXTENSIONS: ReadonlySet<string> = new Set([
   'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'icns', 'avif', 'tif', 'tiff', 'psd', 'heic',
   'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'odt', 'ods', 'odp', 'rtf', 'epub',
   'zip', 'gz', 'tgz', 'tar', 'bz2', 'xz', '7z', 'rar', 'jar', 'war',
   'exe', 'dll', 'so', 'dylib', 'bin', 'dat', 'wasm', 'class', 'pyc', 'o', 'a', 'lib', 'obj',
   'woff', 'woff2', 'ttf', 'otf', 'eot',
   'mp3', 'wav', 'flac', 'ogg', 'oga', 'm4a', 'mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v', 'wmv',
-  'sqlite', 'sqlite3', 'db', 'mdb', 'ttc', 'icns',
+  'sqlite', 'sqlite3', 'db', 'mdb', 'ttc',
 ]);
 
 /**
  * Whether a path is a type the editor does not open by default.
- * @param {string} path - the file path.
- * @returns {boolean} whether it belongs to a preview or external viewer.
+ * @param path the file path.
+ * @returns whether it belongs to a preview or external viewer.
  */
-export function previewOnly(path) {
+export function previewOnly(path: string): boolean {
   const name = basename(path).toLowerCase();
   const dot = name.lastIndexOf('.');
   if (dot < 0) return false;
@@ -242,10 +293,10 @@ export function previewOnly(path) {
 
 /**
  * Whether an address should open in the editor.
- * @param {string} address - the resource address.
- * @returns {boolean} whether the editor claims it.
+ * @param address the resource address.
+ * @returns whether the editor claims it.
  */
-export function canEditAddress(address) {
+export function canEditAddress(address: string | null | undefined): boolean {
   const parsed = parseAddress(address);
   if (parsed === undefined) return false;
   return parsed.path !== '' && !previewOnly(parsed.path);
@@ -253,10 +304,10 @@ export function canEditAddress(address) {
 
 /**
  * The map from error code to locale key.
- * @param {string | undefined} code - the error code.
- * @returns {string} the locale key.
+ * @param code the error code.
+ * @returns the locale key.
  */
-export function errorKey(code) {
+export function errorKey(code: string | undefined): string {
   switch (code) {
     case 'files/outside-workspace':
       return 'error.outside';

@@ -1,7 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
+import type { TextFile } from '../contract.js';
 import {
   basename,
   call,
+  codeOfFailure,
   errorKey,
   isAbsolutePath,
   isInside,
@@ -13,20 +15,35 @@ import {
 } from './api.js';
 import { useWorkspaceBinding } from './binding.js';
 import { BufferEditor } from './editor-host.jsx';
+import type { BufferEditorApi } from './editor-host.jsx';
 import { ConflictBanner } from './dialogs.jsx';
+import type { EditorTabProps } from './harness.js';
 import { IconEye, IconSave } from './icons.jsx';
+import type { BufferError, BufferStatus } from './store.js';
 import { notify } from './store.js';
 import { openPreview, revealInFiles } from './ops.js';
 
-const PREVIEW_CODES = new Set(['files/binary', 'files/too-large', 'files/not-utf8']);
+const PREVIEW_CODES: ReadonlySet<string> = new Set(['files/binary', 'files/too-large', 'files/not-utf8']);
+
+/** One file load. */
+type LoadState =
+  | { status: 'loading' }
+  | { status: 'ready'; file: TextFile }
+  | { status: 'failed'; error: BufferError };
+
+/** The cursor readout. */
+interface CursorReadout {
+  line: number;
+  column: number;
+}
 
 /**
  * One resource file opened as an editor tab. It carries a path from the
  * address and an optional line from navigation parameters.
- * @param {object} props - slot props and injected services.
- * @returns {JSX.Element} the editor tab.
+ * @param props slot props and injected services.
+ * @returns the editor tab.
  */
-export function EditorTab(props) {
+export function EditorTab(props: EditorTabProps) {
   const { t, sessionId, useTabInfo, useSessions, useWorkspaces } = props;
   const { tab } = useTabInfo();
   const parsed = parseAddress(tab.contentId ?? tab.navigation?.address);
@@ -43,28 +60,32 @@ export function EditorTab(props) {
         : root === null
           ? rawPath
           : joinPath(root, rawPath);
-  const line = tab.navigation?.params?.line;
+  const lineParam = tab.navigation?.params?.line;
+  const line = typeof lineParam === 'number' ? lineParam : undefined;
   const readOnly = root === null || absolutePath === '' ? true : !isInside(root, absolutePath);
-  const [load, setLoad] = useState({ status: 'loading', file: null, error: null });
-  const [cursor, setCursor] = useState({ line: 1, column: 1 });
-  const [status, setStatus] = useState('clean');
-  const apiRef = useRef(null);
+  const [load, setLoad] = useState<LoadState>({ status: 'loading' });
+  const [cursor, setCursor] = useState<CursorReadout>({ line: 1, column: 1 });
+  const [status, setStatus] = useState<BufferStatus>('clean');
+  const apiRef = useRef<BufferEditorApi | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     if (workspaceId === null || absolutePath === '') {
-      setLoad({ status: 'failed', file: null, error: { code: 'files/no-workspace', message: 'No workspace.' } });
+      setLoad({
+        status: 'failed',
+        error: { code: 'files/no-workspace', message: 'No workspace.' },
+      });
       return () => {
         cancelled = true;
       };
     }
-    setLoad({ status: 'loading', file: null, error: null });
-    call('read', { workspaceId, path: absolutePath })
+    setLoad({ status: 'loading' });
+    call<TextFile>('read', { workspaceId, path: absolutePath })
       .then((file) => {
-        if (!cancelled) setLoad({ status: 'ready', file, error: null });
+        if (!cancelled) setLoad({ status: 'ready', file });
       })
-      .catch((error) => {
-        if (!cancelled) setLoad({ status: 'failed', file: null, error });
+      .catch((error: unknown) => {
+        if (!cancelled) setLoad({ status: 'failed', error: { code: codeOfFailure(error), message: String(error) } });
       });
     return () => {
       cancelled = true;
@@ -75,8 +96,8 @@ export function EditorTab(props) {
   const directory = absolutePath.slice(0, absolutePath.length - name.length);
   let displayDirectory = root !== null && directory.startsWith(root) ? directory.slice(root.length) : directory;
   if (displayDirectory === '/') displayDirectory = '';
-  const failedCode = load.error?.code;
-  const canPreview = previewOnly(absolutePath) || PREVIEW_CODES.has(failedCode);
+  const failedCode = load.status === 'failed' ? load.error.code : undefined;
+  const canPreview = previewOnly(absolutePath) || (failedCode !== undefined && PREVIEW_CODES.has(failedCode));
 
   return (
     <section className="fdp-root fdp-editor-tab" data-dsh-files="">
@@ -146,7 +167,6 @@ export function EditorTab(props) {
             />
           ) : null}
           <BufferEditor
-            sessionId={targetSession}
             workspaceId={workspaceId}
             path={absolutePath}
             initialText={load.file.text}
@@ -156,13 +176,13 @@ export function EditorTab(props) {
             readOnly={readOnly}
             wrap={false}
             tabSize={2}
-            line={typeof line === 'number' ? line : undefined}
+            line={line}
             autoSave
             onDirty={(dirty) => setStatus(dirty ? 'dirty' : 'clean')}
             onStatus={(next) => setStatus(next)}
             onSaved={() => setStatus('clean')}
             onCursor={setCursor}
-            onError={(error) => notify(t(errorKey(error?.code)), 'error')}
+            onError={(error) => notify(t(errorKey(codeOfFailure(error))), 'error')}
             onApi={(api) => {
               apiRef.current = api;
             }}

@@ -35,11 +35,12 @@ The editor is a lazy chunk (`client.editor.js`), loaded the first time a buffer 
 
 ```bash
 npm install
-npm test        # host, HTTP, client, editor, and workbench tests
-npm run build   # rebuild client.js and client.editor.js
+npm run typecheck  # tsc over the host project and the browser client
+npm test           # host, HTTP, client, editor, and workbench tests
+npm run build      # compile src/host to dist and rebuild both client bundles
 ```
 
-The built artifacts are committed for the linked profile. Edit `src/client/` and rebuild; never edit `client.js` or `client.editor.js` by hand.
+Sources are TypeScript. `src/host/` compiles to `dist/` and is the package entry; `src/client/` is bundled to `client.js` and `client.editor.js`. The wire shapes both halves share live in `src/contract.ts`. The compiled output is committed for the linked profile. Edit `src/` and rebuild; never edit `dist/`, `client.js`, or `client.editor.js` by hand.
 
 ## Verified
 

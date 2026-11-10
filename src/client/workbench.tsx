@@ -1,8 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { basename, dirname, errorKey, languageFor, previewOnly } from './api.js';
+import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react';
+import { basename, codeOfFailure, dirname, errorKey, languageFor, previewOnly } from './api.js';
 import { useWorkspaceBinding } from './binding.js';
 import { BufferEditor } from './editor-host.jsx';
+import type { BufferEditorApi } from './editor-host.jsx';
 import { ConflictBanner } from './dialogs.jsx';
+import type { FilesWorkbenchProps, TreeDirectoryState, TreeEntry, TreeInput } from './harness.js';
 import {
   IconClose,
   IconEye,
@@ -15,17 +18,24 @@ import {
   IconWrap,
 } from './icons.jsx';
 import { contexts, notify, statusLabel, storeFor } from './store.js';
+import type { BufferError } from './store.js';
 import { newFile, newFolder, openPreview } from './ops.js';
 
 const TREE_OPTIONS = { fallback: null };
-const PREVIEW_ONLY_CODES = new Set(['files/binary', 'files/too-large', 'files/not-utf8']);
+const PREVIEW_ONLY_CODES: ReadonlySet<string> = new Set(['files/binary', 'files/too-large', 'files/not-utf8']);
+
+/** The cursor readout. */
+interface CursorReadout {
+  line: number;
+  column: number;
+}
 
 /**
  * A path split into a subdued directory and a primary name.
- * @param {{ path: string, root: string | null }} props - the path and workspace root.
- * @returns {JSX.Element} the label.
+ * @param props the path and workspace root.
+ * @returns the label.
  */
-function PathLabel({ path, root }) {
+function PathLabel({ path, root }: { path: string; root: string | null }) {
   const normalized = path.replace(/\\/g, '/');
   const slash = normalized.lastIndexOf('/');
   const directory = slash < 0 ? '' : normalized.slice(0, slash + 1);
@@ -40,12 +50,20 @@ function PathLabel({ path, root }) {
   );
 }
 
+/** One icon-only control. */
+interface IconButtonProps {
+  label: string;
+  onClick: () => void;
+  children: ReactNode;
+  pressed?: boolean;
+}
+
 /**
  * One icon-only control with a tooltip and accessible name.
- * @param {{ label: string, onClick: () => void, children: React.ReactNode, pressed?: boolean }} props - control input.
- * @returns {JSX.Element} the button.
+ * @param props control input.
+ * @returns the button.
  */
-function IconButton({ label, onClick, children, pressed }) {
+function IconButton({ label, onClick, children, pressed }: IconButtonProps) {
   return (
     <button
       type="button"
@@ -62,10 +80,10 @@ function IconButton({ label, onClick, children, pressed }) {
 
 /**
  * The `files` page: a workspace tree and a CodeMirror editor.
- * @param {object} props - slot props and injected services.
- * @returns {JSX.Element} the workbench.
+ * @param props slot props and injected services.
+ * @returns the workbench.
  */
-export function FilesWorkbench(props) {
+export function FilesWorkbench(props: FilesWorkbenchProps) {
   const { t, useTabInfo, useSessions, useWorkspaces, useContextMenu, renderFactorySlot, sessionId } = props;
   const { tab, panel } = useTabInfo();
   const store = useMemo(() => storeFor(panel.id), [panel.id]);
@@ -73,9 +91,9 @@ export function FilesWorkbench(props) {
   const binding = useWorkspaceBinding({ sessionId, useSessions, useWorkspaces });
   const root = binding.root;
   const workspaceId = binding.workspaceId;
-  const [cursor, setCursor] = useState({ line: 1, column: 1 });
-  const [draggingWidth, setDraggingWidth] = useState(null);
-  const editorApi = useRef(null);
+  const [cursor, setCursor] = useState<CursorReadout>({ line: 1, column: 1 });
+  const [draggingWidth, setDraggingWidth] = useState<number | null>(null);
+  const editorApi = useRef<BufferEditorApi | null>(null);
 
   useEffect(() => {
     if (root !== null && workspaceId !== null) store.init(sessionId, workspaceId, root);
@@ -87,19 +105,20 @@ export function FilesWorkbench(props) {
     }
   }, [sessionId, workspaceId, root, store]);
 
-  const navigation = tab.navigation;
+  const navigationPath = tab.navigation?.params?.path;
+  const navigationRevision = tab.navigation?.revision;
   useEffect(() => {
-    if (navigation?.params?.path && state.root !== null) {
-      void store
-        .reveal(navigation.params.path, { line: navigation.params.line })
-        .catch((error) => notify(t(errorKey(error?.code)), 'error'));
+    if (typeof navigationPath === 'string' && navigationPath !== '' && state.root !== null) {
+      void store.reveal(navigationPath).catch((error: unknown) => {
+        notify(t(errorKey(codeOfFailure(error))), 'error');
+      });
     }
-  }, [navigation?.revision, state.root]);
+  }, [navigationRevision, state.root]);
 
   const active = state.buffers.find((buffer) => buffer.path === state.activePath) ?? null;
 
   const openEntry = useCallback(
-    async (path) => {
+    async (path: string) => {
       if (previewOnly(path)) {
         openPreview(sessionId, path);
         return;
@@ -107,15 +126,16 @@ export function FilesWorkbench(props) {
       try {
         await store.openFile(path);
       } catch (error) {
-        if (PREVIEW_ONLY_CODES.has(error?.code)) openPreview(sessionId, path);
-        else notify(t(errorKey(error?.code)), 'error');
+        const code = codeOfFailure(error);
+        if (code !== undefined && PREVIEW_ONLY_CODES.has(code)) openPreview(sessionId, path);
+        else notify(t(errorKey(code)), 'error');
       }
     },
     [sessionId, store, t],
   );
 
   const entries = useMemo(() => {
-    const list = [];
+    const list: TreeEntry[] = [];
     for (const [levelPath, level] of Object.entries(state.levels)) {
       if (level.status !== 'ready') continue;
       for (const entry of level.entries) {
@@ -130,14 +150,17 @@ export function FilesWorkbench(props) {
   }, [state.levels]);
 
   const directories = useMemo(() => {
-    const map = {};
-    const paths = new Set([state.root, ...state.expanded].filter((path) => typeof path === 'string' && path !== ''));
+    const map: Record<string, TreeDirectoryState> = {};
+    const paths = new Set<string>();
+    if (state.root !== null) paths.add(state.root);
+    for (const path of state.expanded) paths.add(path);
     for (const path of paths) {
+      if (path === '') continue;
       const key = path.replace(/\/+$/, '');
       const level = state.levels[path];
       if (level === undefined || level.status === 'loading') map[key] = { loading: true };
       else if (level.status === 'failed') map[key] = { failure: t('tree.failed') };
-      else map[key] = level.truncated ? { truncated: true } : {};
+      else map[key] = level.truncated === true ? { truncated: true } : {};
     }
     return map;
   }, [state.levels, state.expanded, state.root, t]);
@@ -145,7 +168,7 @@ export function FilesWorkbench(props) {
   const contextMenu = typeof useContextMenu === 'function' ? useContextMenu() : null;
   const getTriggerProps = contextMenu?.getTriggerProps;
 
-  const treeInput = useMemo(
+  const treeInput = useMemo<TreeInput>(
     () => ({
       root: state.root === null ? '' : state.root.replace(/\/+$/, ''),
       entries,
@@ -168,7 +191,7 @@ export function FilesWorkbench(props) {
     [state.root, entries, state.expanded, directories, active?.path, getTriggerProps, sessionId, panel.id, store, openEntry],
   );
 
-  const closeBuffer = async (path) => {
+  const closeBuffer = async (path: string) => {
     const buffer = store.buffer(path);
     if (buffer !== undefined && path === state.activePath && (buffer.status === 'dirty' || buffer.status === 'conflict')) {
       await editorApi.current?.save();
@@ -183,12 +206,13 @@ export function FilesWorkbench(props) {
   const treeWidth = draggingWidth ?? state.treeWidth;
   const targetDirectory = active === null ? state.root : dirname(active.path);
 
-  const beginResize = (event) => {
+  const beginResize = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
     event.preventDefault();
     const startX = event.clientX;
     const startWidth = state.treeWidth;
-    const move = (moveEvent) => setDraggingWidth(Math.max(180, Math.min(560, startWidth + moveEvent.clientX - startX)));
+    const move = (moveEvent: PointerEvent) =>
+      setDraggingWidth(Math.max(180, Math.min(560, startWidth + moveEvent.clientX - startX)));
     const end = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', end);
@@ -302,7 +326,12 @@ export function FilesWorkbench(props) {
                       onClick={() => store.setActive(buffer.path)}
                     >
                       <span className="fdp-tab-name">{basename(buffer.path)}</span>
-                      {dirty ? <span className={buffer.status === 'conflict' ? 'fdp-dot fdp-dot-warn' : 'fdp-dot'} aria-hidden="true" /> : null}
+                      {dirty ? (
+                        <span
+                          className={buffer.status === 'conflict' ? 'fdp-dot fdp-dot-warn' : 'fdp-dot'}
+                          aria-hidden="true"
+                        />
+                      ) : null}
                     </button>
                     <button
                       type="button"
@@ -341,24 +370,23 @@ export function FilesWorkbench(props) {
               ) : null}
               <BufferEditor
                 key={`${active.path}:${state.wrap}`}
-                sessionId={sessionId}
                 workspaceId={workspaceId}
                 path={active.path}
-                initialText={active.text ?? ''}
+                initialText={active.text}
                 version={active.version}
                 eol={active.eol}
                 bom={active.bom}
-                readOnly={active.readOnly === true}
+                readOnly={active.readOnly}
                 wrap={state.wrap}
                 tabSize={2}
-                line={tab.navigation?.params?.line}
+                line={typeof tab.navigation?.params?.line === 'number' ? tab.navigation.params.line : undefined}
                 autoSave={state.autoSave}
                 onChange={(text) => store.setBufferText(active.path, text)}
                 onDirty={(dirty) => store.setBufferStatus(active.path, dirty ? 'dirty' : 'clean')}
-                onStatus={(status, error) => store.setBufferStatus(active.path, status, error ?? null)}
+                onStatus={(status, error?: BufferError) => store.setBufferStatus(active.path, status, error ?? null)}
                 onSaved={(version) => store.updateBuffer(active.path, { version, status: 'clean' })}
                 onCursor={setCursor}
-                onError={(error) => notify(t(errorKey(error?.code)), 'error')}
+                onError={(error) => notify(t(errorKey(codeOfFailure(error))), 'error')}
                 onApi={(api) => {
                   editorApi.current = api;
                 }}

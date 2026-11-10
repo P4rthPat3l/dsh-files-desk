@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { createHandler } from '../lib/rpc.js';
+import { createHandler } from '../dist/host/lib/rpc.js';
 
 const peer = { principal: { kind: 'owner' } };
 let base;

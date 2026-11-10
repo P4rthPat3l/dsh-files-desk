@@ -1,5 +1,7 @@
 import React from 'react';
+import type { ReactNode } from 'react';
 import { basename, canEditAddress, configureConnection, parseAddress } from './api.js';
+import type { ClientContext, EditorTabProps, FilesWorkbenchProps, Translator, UseTabInfo } from './harness.js';
 import { EN, ZH, setTranslator } from './locale.js';
 import { registerMenus } from './menus.js';
 import { runtime } from './runtime.js';
@@ -7,10 +9,10 @@ import { FileOpsHost } from './dialogs.jsx';
 import { SurfaceBoundary } from './boundary.jsx';
 import { FilesWorkbench } from './workbench.jsx';
 import { EditorTab } from './editor-tab.jsx';
-
-export { EditorTab, FilesWorkbench };
 import { IconFile, IconFolder } from './icons.jsx';
 import { installStyles } from './styles.js';
+
+export { EditorTab, FilesWorkbench };
 
 const h = React.createElement;
 const NS = 'files';
@@ -19,21 +21,26 @@ const EDITOR_ID = 'dsh-files-desk/editor';
 
 export const inject = ['connection', 'slots', 'locale', 'sidebarRightTabs', 'sidebarRight', 'contextMenus'];
 
+/** A leading icon and a label. */
+interface ChipProps {
+  icon: ReactNode;
+  text: string;
+}
+
 /**
  * The chip content before a tab title.
- * @param {React.ReactNode} icon - the leading icon.
- * @param {string} text - the label.
- * @returns {JSX.Element} the chip.
+ * @param props the leading icon and label.
+ * @returns the chip.
  */
-function Chip({ icon, text }) {
+function Chip({ icon, text }: ChipProps) {
   return h('span', { className: 'fdp-chip' }, icon, h('span', null, text));
 }
 
 /**
  * The artwork for the Files guide card.
- * @returns {JSX.Element} a folder with a code mark.
+ * @returns a folder with a code mark.
  */
-function GuideFilesIcon() {
+function GuideFilesIcon(): ReactNode {
   return h(
     'svg',
     {
@@ -54,10 +61,10 @@ function GuideFilesIcon() {
 
 /**
  * The Files body with a boundary that keeps a render failure inside the pane.
- * @param {object} props - slot props.
- * @returns {JSX.Element} the body.
+ * @param props slot props.
+ * @returns the body.
  */
-function FilesBody(props) {
+function FilesBody(props: FilesWorkbenchProps): ReactNode {
   return h(
     SurfaceBoundary,
     {
@@ -71,10 +78,10 @@ function FilesBody(props) {
 
 /**
  * The editor tab body with the same boundary.
- * @param {object} props - slot props.
- * @returns {JSX.Element} the body.
+ * @param props slot props.
+ * @returns the body.
  */
-function EditorBody(props) {
+function EditorBody(props: EditorTabProps): ReactNode {
   return h(
     SurfaceBoundary,
     {
@@ -88,19 +95,19 @@ function EditorBody(props) {
 
 /**
  * The Files tab chip.
- * @param {{ t: (key: string) => string }} props - the injected translator.
- * @returns {JSX.Element} the chip.
+ * @param props the injected translator.
+ * @returns the chip.
  */
-function FilesTitle({ t }) {
+function FilesTitle({ t }: { t: Translator }): ReactNode {
   return h(Chip, { icon: h(IconFolder, { size: 14 }), text: t('panel') });
 }
 
 /**
  * The editor tab chip, named after the file in the address.
- * @param {{ t: (key: string) => string, useTabInfo: Function }} props - injected translator and tab hook.
- * @returns {JSX.Element} the chip.
+ * @param props the injected translator and tab hook.
+ * @returns the chip.
  */
-function EditorTitle({ useTabInfo }) {
+function EditorTitle({ useTabInfo }: { useTabInfo: UseTabInfo }): ReactNode {
   const { tab } = useTabInfo();
   const parsed = parseAddress(tab.contentId ?? tab.navigation?.address);
   return h(Chip, { icon: h(IconFile, { size: 14 }), text: parsed === undefined ? '' : basename(parsed.path) });
@@ -109,16 +116,16 @@ function EditorTitle({ useTabInfo }) {
 /**
  * Register the files workbench, the editor tab type, the overlay dialogs, and
  * the shared file menus.
- * @param {object} ctx - the plugin context.
+ * @param ctx the plugin context.
  */
-export function apply(ctx) {
+export function apply(ctx: ClientContext): void {
   installStyles();
   configureConnection(ctx);
   runtime.sidebarRight = ctx.sidebarRight;
 
   ctx.locale.register(NS, 'en', EN);
   ctx.locale.register(NS, 'zh', ZH);
-  const t = (key, values) => ctx.locale.bind(NS)(key, values);
+  const t: Translator = (key, values) => ctx.locale.bind(NS)(key, values);
   setTranslator(t);
 
   ctx.effect(

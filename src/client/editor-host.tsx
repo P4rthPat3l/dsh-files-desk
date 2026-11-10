@@ -1,22 +1,67 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { call, languageFor } from './api.js';
+import type { FileStat, TextFile, WrittenFile } from '../contract.js';
+import { call, codeOfFailure, languageFor } from './api.js';
+import type { CursorPosition, EditorChunk, EditorHandle } from './editor/entry.js';
 import { tr } from './locale.js';
+import type { BufferError, BufferStatus } from './store.js';
 
-let chunkPromise = null;
+let chunkPromise: Promise<EditorChunk> | null = null;
 
 /**
  * Load the editor chunk once.
- * @returns {Promise<object>} the chunk exports.
+ * @returns the chunk exports.
  */
-function loadEditorChunk() {
+function loadEditorChunk(): Promise<EditorChunk> {
   if (chunkPromise === null) {
     const load = globalThis.__dshFilesDeskRequireAsync;
-    if (typeof load !== 'function') {
-      throw new Error('The editor chunk loader is unavailable.');
-    }
-    chunkPromise = load('./client.editor.js');
+    if (typeof load !== 'function') throw new Error('The editor chunk loader is unavailable.');
+    chunkPromise = load<EditorChunk>('./client.editor.js');
   }
   return chunkPromise;
+}
+
+/** The handle a parent keeps to drive one open buffer. */
+export interface BufferEditorApi {
+  save: () => Promise<boolean> | undefined;
+  reload: () => Promise<void>;
+  overwrite: () => Promise<void>;
+  focus: () => void;
+  revealLine: (line: number) => void;
+  getText: () => string;
+}
+
+/** Buffer identity, initial content, preferences, and callbacks. */
+export interface BufferEditorProps {
+  workspaceId: string | null;
+  path: string;
+  initialText: string;
+  version: string | null;
+  eol: 'lf' | 'crlf';
+  bom: boolean;
+  readOnly: boolean;
+  wrap: boolean;
+  tabSize: number;
+  line?: number;
+  autoSave: boolean;
+  onChange?: (text: string) => void;
+  onDirty?: (dirty: boolean) => void;
+  onStatus?: (status: BufferStatus, error?: BufferError) => void;
+  onSaved?: (version: string) => void;
+  onCursor?: (position: CursorPosition) => void;
+  onError?: (error: unknown) => void;
+  onApi?: (api: BufferEditorApi) => void;
+}
+
+/**
+ * Read a failure as a buffer error.
+ * @param error the thrown value.
+ * @returns the message and code.
+ */
+function bufferErrorOf(error: unknown): BufferError {
+  return {
+    code: codeOfFailure(error),
+    message: error instanceof Error ? error.message : String(error),
+  };
 }
 
 /**
@@ -27,41 +72,41 @@ function loadEditorChunk() {
  * component owns the document text, the version it last read or wrote, and the
  * save loop.
  *
- * @param {object} props - buffer identity, initial content, preferences, and callbacks.
- * @returns {JSX.Element} the editor surface.
+ * @param props buffer identity, initial content, preferences, and callbacks.
+ * @returns the editor surface.
  */
-export function BufferEditor(props) {
-  const { workspaceId, path, initialText, version, eol, bom, readOnly, wrap, tabSize, line, autoSave } = props;
-  const hostRef = useRef(null);
-  const handleRef = useRef(null);
+export function BufferEditor(props: BufferEditorProps) {
+  const { workspaceId, path, initialText, version, readOnly, wrap, tabSize, line } = props;
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const handleRef = useRef<EditorHandle | null>(null);
   const latestRef = useRef(initialText);
   const savedRef = useRef(initialText);
-  const versionRef = useRef(version);
+  const versionRef = useRef<string | null>(version);
   const dirtyRef = useRef(false);
   const savingRef = useRef(false);
   const conflictRef = useRef(false);
-  const autosaveRef = useRef(null);
+  const autosaveRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const propsRef = useRef(props);
-  const saveRef = useRef(null);
+  const saveRef = useRef<((text: string, forcedVersion?: string) => Promise<boolean>) | null>(null);
   const [failed, setFailed] = useState(false);
   propsRef.current = props;
 
   /**
    * Write the current text when its version still matches.
-   * @param {string} text - the document text.
-   * @param {string} [forcedVersion] - a version to use instead, for overwrite.
-   * @returns {Promise<boolean>} whether the write succeeded.
+   * @param text the document text.
+   * @param forcedVersion a version to use instead, for overwrite.
+   * @returns whether the write succeeded.
    */
-  async function performSave(text, forcedVersion) {
+  async function performSave(text: string, forcedVersion?: string): Promise<boolean> {
     if (propsRef.current.readOnly || savingRef.current) return false;
     savingRef.current = true;
     propsRef.current.onStatus?.('saving');
     try {
-      const result = await call('write', {
+      const result = await call<WrittenFile>('write', {
         workspaceId: propsRef.current.workspaceId,
         path: propsRef.current.path,
         text,
-        version: forcedVersion ?? versionRef.current,
+        version: forcedVersion ?? versionRef.current ?? '',
         eol: propsRef.current.eol,
         bom: propsRef.current.bom,
       });
@@ -75,11 +120,11 @@ export function BufferEditor(props) {
       propsRef.current.onStatus?.('saved');
       return true;
     } catch (error) {
-      if (error.code === 'files/conflict') {
+      if (codeOfFailure(error) === 'files/conflict') {
         conflictRef.current = true;
         propsRef.current.onStatus?.('conflict');
       } else {
-        propsRef.current.onStatus?.('error', error);
+        propsRef.current.onStatus?.('error', bufferErrorOf(error));
         propsRef.current.onError?.(error);
       }
       return false;
@@ -90,9 +135,12 @@ export function BufferEditor(props) {
   saveRef.current = performSave;
 
   /** Read the file again and replace the document. */
-  async function reload() {
+  async function reload(): Promise<void> {
     try {
-      const file = await call('read', { workspaceId: propsRef.current.workspaceId, path: propsRef.current.path });
+      const file = await call<TextFile>('read', {
+        workspaceId: propsRef.current.workspaceId,
+        path: propsRef.current.path,
+      });
       versionRef.current = file.version;
       savedRef.current = file.text;
       latestRef.current = file.text;
@@ -108,9 +156,12 @@ export function BufferEditor(props) {
   }
 
   /** Write over the disk version after the user chose overwrite. */
-  async function overwrite() {
+  async function overwrite(): Promise<void> {
     try {
-      const stat = await call('stat', { workspaceId: propsRef.current.workspaceId, path: propsRef.current.path });
+      const stat = await call<FileStat>('stat', {
+        workspaceId: propsRef.current.workspaceId,
+        path: propsRef.current.path,
+      });
       await performSave(handleRef.current?.getText() ?? latestRef.current, stat.version);
     } catch (error) {
       propsRef.current.onError?.(error);
@@ -119,9 +170,9 @@ export function BufferEditor(props) {
 
   /**
    * Handle one document change: dirty state, parent record, and autosave.
-   * @param {string} text - the current document text.
+   * @param text the current document text.
    */
-  function handleChange(text) {
+  function handleChange(text: string): void {
     latestRef.current = text;
     propsRef.current.onChange?.(text);
     const dirty = text !== savedRef.current;
@@ -161,7 +212,7 @@ export function BufferEditor(props) {
           },
         });
         handleRef.current = handle;
-        const api = {
+        const api: BufferEditorApi = {
           save: () => saveRef.current?.(handle.getText()),
           reload,
           overwrite,
@@ -171,9 +222,8 @@ export function BufferEditor(props) {
         };
         propsRef.current.onApi?.(api);
         propsRef.current.onStatus?.(dirtyRef.current ? 'dirty' : 'clean');
-        if (typeof propsRef.current.line === 'number' && propsRef.current.line > 0) {
-          handle.revealLine(propsRef.current.line);
-        }
+        const initialLine = propsRef.current.line;
+        if (typeof initialLine === 'number' && initialLine > 0) handle.revealLine(initialLine);
       })
       .catch(() => {
         if (!cancelled) setFailed(true);
@@ -196,7 +246,7 @@ export function BufferEditor(props) {
       if (savingRef.current) return;
       void (async () => {
         try {
-          const stat = await call('stat', { workspaceId, path });
+          const stat = await call<FileStat>('stat', { workspaceId, path });
           if (stat.version === versionRef.current) return;
           if (dirtyRef.current) {
             if (!conflictRef.current) {

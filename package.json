@@ -16,17 +16,16 @@
   "license": "MIT",
   "author": "Parth Patel",
   "exports": {
-    ".": "./index.js",
+    ".": "./dist/host/index.js",
     "./client": "./client.js",
     "./locale/*.json": "./locale/*.json",
     "./icon": "./icon.svg"
   },
   "files": [
-    "index.js",
+    "dist",
     "client.js",
     "client.editor.js",
     "cordis.patch.yml",
-    "lib",
     "locale/*.json",
     "icon.svg",
     "LICENSE",
@@ -52,7 +51,8 @@
     }
   },
   "scripts": {
-    "build": "node scripts/build.mjs",
+    "build": "rm -rf dist && tsc -p src/host/tsconfig.json && node scripts/build.mjs",
+    "typecheck": "tsc -p src/host/tsconfig.json --noEmit && tsc -p src/client/tsconfig.json",
     "test": "node --test tests/*.test.mjs"
   },
   "devDependencies": {
@@ -76,9 +76,13 @@
     "@codemirror/state": "^6.5.2",
     "@codemirror/view": "^6.36.5",
     "@lezer/highlight": "^1.2.5",
+    "@types/node": "^22.20.5",
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
     "esbuild": "^0.25.0",
     "jsdom": "^25.0.1",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "typescript": "^5.9.3"
   }
 }

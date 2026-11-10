@@ -55,8 +55,8 @@ ${js}
 `;
 }
 
-const main = await bundle('src/client/index.js');
-const editor = await bundle('src/client/editor/entry.js');
+const main = await bundle('src/client/index.ts');
+const editor = await bundle('src/client/editor/entry.ts');
 await fs.writeFile(path.join(ROOT, 'client.js'), wrap(main, { id: 'dsh-files-desk', bridge: true }));
 await fs.writeFile(path.join(ROOT, 'client.editor.js'), wrap(editor, { id: 'dsh-files-desk', chunk: 'client.editor.js' }));
 console.log(`client.js ${main.length} bytes`);

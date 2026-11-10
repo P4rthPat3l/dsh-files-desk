@@ -1,11 +1,18 @@
 import React from 'react';
+import type { ReactNode } from 'react';
+
+/** One icon's path children and size. */
+interface IconProps {
+  children: ReactNode;
+  size?: number;
+}
 
 /**
  * One 16px stroke icon.
- * @param {{ children: React.ReactNode, size?: number }} props - path children and size.
- * @returns {JSX.Element} the icon.
+ * @param props path children and size.
+ * @returns the icon.
  */
-function Icon({ children, size = 16 }) {
+function Icon({ children, size = 16 }: IconProps) {
   return (
     <svg
       width={size}

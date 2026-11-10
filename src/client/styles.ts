@@ -371,7 +371,7 @@ body[data-ds-dark-theme] .fdp-root {
 `;
 
 /** Install the plugin stylesheet once. */
-export function installStyles() {
+export function installStyles(): void {
   if (typeof document === 'undefined') return;
   if (document.querySelector(`style[data-plugin-css="${STYLE_ID}"]`) !== null) return;
   const tag = document.createElement('style');

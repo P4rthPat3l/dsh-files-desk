@@ -1,37 +1,43 @@
-import { addressFor, basename, call, dirname, errorKey, joinPath } from './api.js';
+import { addressFor, basename, call, codeOfFailure, dirname, errorKey, joinPath } from './api.js';
 import { askConfirm, askName, clipboard, contexts, notify } from './store.js';
 import { tr } from './locale.js';
 import { runtime } from './runtime.js';
 
 const PREVIEW_KIND = 'text';
 
-/**
- * Show a failed operation as a notice.
- * @param {object} error - the failure.
- */
-export function report(error) {
-  notify(tr(errorKey(error?.code)), 'error');
-}
+/** A refused name, reported like a host failure. */
+class NameError extends Error {
+  readonly code = 'files/name';
 
-/**
- * Reject a name that would change the parent directory.
- * @param {string} name - the submitted name.
- */
-function assertSimpleName(name) {
-  if (name.includes('/') || name.includes('\\') || name === '.' || name === '..') {
-    const error = new Error('A name without path separators is required.');
-    error.code = 'files/name';
-    throw error;
+  constructor() {
+    super('A name without path separators is required.');
+    this.name = 'NameError';
   }
 }
 
 /**
- * Open one path in the editor tab at a line.
- * @param {string} sessionId - the session.
- * @param {string} path - the file path.
- * @param {number} [line] - a 1-based line.
+ * Show a failed operation as a notice.
+ * @param error the failure.
  */
-export function openInEditor(sessionId, path, line) {
+export function report(error: unknown): void {
+  notify(tr(errorKey(codeOfFailure(error))), 'error');
+}
+
+/**
+ * Reject a name that would change the parent directory.
+ * @param name the submitted name.
+ */
+function assertSimpleName(name: string): void {
+  if (name.includes('/') || name.includes('\\') || name === '.' || name === '..') throw new NameError();
+}
+
+/**
+ * Open one path in the editor tab at a line.
+ * @param sessionId the session.
+ * @param path the file path.
+ * @param line a 1-based line.
+ */
+export function openInEditor(sessionId: string, path: string, line?: number): void {
   const cwd = contexts.get(sessionId)?.root;
   const params = typeof line === 'number' && line > 0 ? { line } : {};
   runtime.sidebarRight?.openResource(addressFor(sessionId, cwd ?? undefined, path), { params });
@@ -39,11 +45,11 @@ export function openInEditor(sessionId, path, line) {
 
 /**
  * Open one path in the shipped preview.
- * @param {string} sessionId - the session.
- * @param {string} path - the file path.
- * @param {number} [line] - a 1-based line.
+ * @param sessionId the session.
+ * @param path the file path.
+ * @param line a 1-based line.
  */
-export function openPreview(sessionId, path, line) {
+export function openPreview(sessionId: string, path: string, line?: number): void {
   const cwd = contexts.get(sessionId)?.root;
   const params = typeof line === 'number' && line > 0 ? { line } : {};
   runtime.sidebarRight?.openResource(addressFor(sessionId, cwd ?? undefined, path), { kind: PREVIEW_KIND, params });
@@ -51,17 +57,17 @@ export function openPreview(sessionId, path, line) {
 
 /**
  * Open the workbench at one path.
- * @param {string} path - the file path.
+ * @param path the file path.
  */
-export function revealInFiles(path) {
+export function revealInFiles(path: string): void {
   runtime.sidebarRight?.openTab('files', { params: { path } });
 }
 
 /**
  * Copy an absolute path to the browser clipboard.
- * @param {string} path - the path.
+ * @param path the path.
  */
-export async function copyPath(path) {
+export async function copyPath(path: string): Promise<void> {
   try {
     await navigator.clipboard.writeText(path);
     notify(tr('toast.copiedPath'));
@@ -72,10 +78,10 @@ export async function copyPath(path) {
 
 /**
  * Create a file in a directory.
- * @param {string} sessionId - the session.
- * @param {string} directory - the target directory.
+ * @param sessionId the session.
+ * @param directory the target directory.
  */
-export async function newFile(sessionId, directory) {
+export async function newFile(sessionId: string, directory: string): Promise<void> {
   const context = contexts.get(sessionId);
   if (context === undefined) return;
   await askName({
@@ -87,18 +93,18 @@ export async function newFile(sessionId, directory) {
       assertSimpleName(name);
       const target = joinPath(directory, name);
       await call('create', { workspaceId: context.workspaceId, path: target, kind: 'file' });
-      context.store?.refreshPath(directory);
-      if (context.store !== undefined) void context.store.reveal(target).catch(report);
+      context.store.refreshPath(directory);
+      void context.store.reveal(target).catch(report);
     },
   });
 }
 
 /**
  * Create a folder in a directory.
- * @param {string} sessionId - the session.
- * @param {string} directory - the target directory.
+ * @param sessionId the session.
+ * @param directory the target directory.
  */
-export async function newFolder(sessionId, directory) {
+export async function newFolder(sessionId: string, directory: string): Promise<void> {
   const context = contexts.get(sessionId);
   if (context === undefined) return;
   await askName({
@@ -109,17 +115,17 @@ export async function newFolder(sessionId, directory) {
     submit: async (name) => {
       assertSimpleName(name);
       await call('create', { workspaceId: context.workspaceId, path: joinPath(directory, name), kind: 'directory' });
-      context.store?.refreshPath(directory);
+      context.store.refreshPath(directory);
     },
   });
 }
 
 /**
  * Rename one entry.
- * @param {string} sessionId - the session.
- * @param {string} path - the entry path.
+ * @param sessionId the session.
+ * @param path the entry path.
  */
-export async function renameEntry(sessionId, path) {
+export async function renameEntry(sessionId: string, path: string): Promise<void> {
   const context = contexts.get(sessionId);
   if (context === undefined) return;
   await askName({
@@ -131,18 +137,18 @@ export async function renameEntry(sessionId, path) {
       assertSimpleName(name);
       const target = joinPath(dirname(path), name);
       await call('rename', { workspaceId: context.workspaceId, from: path, to: target });
-      context.store?.renameBuffers(path, target);
-      context.store?.refreshPath(dirname(path));
+      context.store.renameBuffers(path, target);
+      context.store.refreshPath(dirname(path));
     },
   });
 }
 
 /**
  * Copy one entry next to itself with a unique name.
- * @param {string} sessionId - the session.
- * @param {string} path - the entry path.
+ * @param sessionId the session.
+ * @param path the entry path.
  */
-export async function duplicateEntry(sessionId, path) {
+export async function duplicateEntry(sessionId: string, path: string): Promise<void> {
   const context = contexts.get(sessionId);
   if (context === undefined) return;
   const parent = dirname(path);
@@ -155,10 +161,10 @@ export async function duplicateEntry(sessionId, path) {
       const candidate = joinPath(parent, index === 1 ? `${stem} copy${extension}` : `${stem} copy ${index}${extension}`);
       try {
         await call('copy', { workspaceId: context.workspaceId, from: path, to: candidate });
-        context.store?.refreshPath(parent);
+        context.store.refreshPath(parent);
         return;
       } catch (error) {
-        if (error.code !== 'files/exists') throw error;
+        if (codeOfFailure(error) !== 'files/exists') throw error;
       }
     }
   } catch (error) {
@@ -168,11 +174,11 @@ export async function duplicateEntry(sessionId, path) {
 
 /**
  * Put one path on the client clipboard.
- * @param {string} sessionId - the session.
- * @param {string} path - the entry path.
- * @param {'copy' | 'cut'} mode - the clipboard mode.
+ * @param sessionId the session.
+ * @param path the entry path.
+ * @param mode the clipboard mode.
  */
-export function setFileClipboard(sessionId, path, mode) {
+export function setFileClipboard(sessionId: string, path: string, mode: 'copy' | 'cut'): void {
   clipboard.path = path;
   clipboard.mode = mode;
   clipboard.sessionId = sessionId;
@@ -181,10 +187,10 @@ export function setFileClipboard(sessionId, path, mode) {
 
 /**
  * Paste the client clipboard into a directory.
- * @param {string} sessionId - the session.
- * @param {string} directory - the target directory.
+ * @param sessionId the session.
+ * @param directory the target directory.
  */
-export async function pasteInto(sessionId, directory) {
+export async function pasteInto(sessionId: string, directory: string): Promise<void> {
   const context = contexts.get(sessionId);
   if (context === undefined || clipboard.path === null) return;
   const source = clipboard.path;
@@ -192,14 +198,14 @@ export async function pasteInto(sessionId, directory) {
   try {
     if (clipboard.mode === 'cut') {
       await call('rename', { workspaceId: context.workspaceId, from: source, to: target });
-      context.store?.renameBuffers(source, target);
+      context.store.renameBuffers(source, target);
       clipboard.path = null;
       clipboard.mode = null;
       clipboard.sessionId = null;
     } else {
       await call('copy', { workspaceId: context.workspaceId, from: source, to: target });
     }
-    context.store?.refreshPath(directory);
+    context.store.refreshPath(directory);
     notify(tr('toast.pasted', { name: basename(target) }));
   } catch (error) {
     report(error);
@@ -208,11 +214,11 @@ export async function pasteInto(sessionId, directory) {
 
 /**
  * Delete one entry after confirmation.
- * @param {string} sessionId - the session.
- * @param {string} path - the entry path.
- * @param {boolean} directory - whether the entry is a folder.
+ * @param sessionId the session.
+ * @param path the entry path.
+ * @param directory whether the entry is a folder.
  */
-export async function deleteEntry(sessionId, path, directory) {
+export async function deleteEntry(sessionId: string, path: string, directory: boolean): Promise<void> {
   const context = contexts.get(sessionId);
   if (context === undefined) return;
   const name = basename(path);
@@ -225,8 +231,8 @@ export async function deleteEntry(sessionId, path, directory) {
   if (!confirmed) return;
   try {
     await call('delete', { workspaceId: context.workspaceId, path });
-    context.store?.closeBuffersUnder(path);
-    context.store?.refreshPath(dirname(path));
+    context.store.closeBuffersUnder(path);
+    context.store.refreshPath(dirname(path));
   } catch (error) {
     report(error);
   }

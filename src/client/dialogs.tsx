@@ -1,24 +1,32 @@
 import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { errorKey } from './api.js';
+import { codeOfFailure, errorKey } from './api.js';
+import type { Translator } from './harness.js';
+import type { ConfirmRequest, PromptRequest } from './store.js';
 import { overlay } from './store.js';
+
+/** The name dialog's props. */
+interface PromptDialogProps {
+  t: Translator;
+  data: PromptRequest;
+}
 
 /**
  * The name dialog driven by `askName`.
- * @param {{ t: (key: string, values?: object) => string, data: object }} props - translator and dialog data.
- * @returns {JSX.Element} the dialog.
+ * @param props translator and dialog data.
+ * @returns the dialog.
  */
-function PromptDialog({ t, data }) {
-  const [value, setValue] = useState(data.initial ?? '');
-  const [error, setError] = useState(null);
+function PromptDialog({ t, data }: PromptDialogProps) {
+  const [value, setValue] = useState(data.initial);
+  const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const inputRef = useRef(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     inputRef.current?.focus();
     inputRef.current?.select();
   }, []);
 
-  const close = (result) => {
+  const close = (result: string | null) => {
     overlay.patch({ prompt: null });
     data.resolve(result);
   };
@@ -33,18 +41,28 @@ function PromptDialog({ t, data }) {
       overlay.patch({ prompt: null });
       data.resolve(trimmed);
     } catch (failure) {
-      setError(t(errorKey(failure?.code)));
+      setError(t(errorKey(codeOfFailure(failure))));
       setBusy(false);
     }
   };
 
   return (
-    <div className="fdp-scrim" role="presentation" onPointerDown={(event) => {
-      if (event.target === event.currentTarget && !busy) close(null);
-    }}>
-      <div className="fdp-dialog" role="dialog" aria-modal="true" aria-label={data.title} onKeyDown={(event) => {
-        if (event.key === 'Escape' && !busy) close(null);
-      }}>
+    <div
+      className="fdp-scrim"
+      role="presentation"
+      onPointerDown={(event) => {
+        if (event.target === event.currentTarget && !busy) close(null);
+      }}
+    >
+      <div
+        className="fdp-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label={data.title}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape' && !busy) close(null);
+        }}
+      >
         <div className="fdp-dialog-head">{data.title}</div>
         <label className="fdp-field">
           <span className="fdp-field-label">{data.label}</span>
@@ -70,7 +88,12 @@ function PromptDialog({ t, data }) {
           <button type="button" className="fdp-button" disabled={busy} onClick={() => close(null)}>
             {t('action.cancel')}
           </button>
-          <button type="button" className="fdp-button fdp-button-primary" disabled={busy || value.trim() === ''} onClick={() => void submit()}>
+          <button
+            type="button"
+            className="fdp-button fdp-button-primary"
+            disabled={busy || value.trim() === ''}
+            onClick={() => void submit()}
+          >
             {busy ? '...' : data.confirmLabel}
           </button>
         </div>
@@ -79,23 +102,39 @@ function PromptDialog({ t, data }) {
   );
 }
 
+/** The confirmation dialog's props. */
+interface ConfirmDialogProps {
+  t: Translator;
+  data: ConfirmRequest;
+}
+
 /**
  * The confirmation dialog driven by `askConfirm`.
- * @param {{ t: (key: string, values?: object) => string, data: object }} props - translator and dialog data.
- * @returns {JSX.Element} the dialog.
+ * @param props translator and dialog data.
+ * @returns the dialog.
  */
-function ConfirmDialog({ t, data }) {
-  const close = (result) => {
+function ConfirmDialog({ t, data }: ConfirmDialogProps) {
+  const close = (result: boolean) => {
     overlay.patch({ confirm: null });
     data.resolve(result);
   };
   return (
-    <div className="fdp-scrim" role="presentation" onPointerDown={(event) => {
-      if (event.target === event.currentTarget) close(false);
-    }}>
-      <div className="fdp-dialog" role="dialog" aria-modal="true" aria-label={data.title} onKeyDown={(event) => {
-        if (event.key === 'Escape') close(false);
-      }}>
+    <div
+      className="fdp-scrim"
+      role="presentation"
+      onPointerDown={(event) => {
+        if (event.target === event.currentTarget) close(false);
+      }}
+    >
+      <div
+        className="fdp-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label={data.title}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') close(false);
+        }}
+      >
         <div className="fdp-dialog-head">{data.title}</div>
         <p className="fdp-dialog-message">{data.message}</p>
         <div className="fdp-dialog-actions">
@@ -117,10 +156,10 @@ function ConfirmDialog({ t, data }) {
 
 /**
  * The overlay host: dialogs and notices for file operations from anywhere.
- * @param {{ t: (key: string) => string }} props - translator.
- * @returns {JSX.Element | null} the host.
+ * @param props translator.
+ * @returns the host.
  */
-export function FileOpsHost({ t }) {
+export function FileOpsHost({ t }: { t: Translator }) {
   const state = useSyncExternalStore(overlay.subscribe, overlay.getSnapshot);
   const toast = state.toast;
   if (state.prompt === null && state.confirm === null && toast === null) return null;
@@ -137,12 +176,19 @@ export function FileOpsHost({ t }) {
   );
 }
 
+/** The inline conflict banner's props. */
+export interface ConflictBannerProps {
+  t: Translator;
+  onReload: () => void;
+  onOverwrite: () => void;
+}
+
 /**
  * The inline banner shown when a buffer conflicts with the disk.
- * @param {{ t: (key: string) => string, onReload: () => void, onOverwrite: () => void }} props - actions.
- * @returns {JSX.Element} the banner.
+ * @param props the banner actions.
+ * @returns the banner.
  */
-export function ConflictBanner({ t, onReload, onOverwrite }) {
+export function ConflictBanner({ t, onReload, onOverwrite }: ConflictBannerProps) {
   return (
     <div className="fdp-conflict" role="alert">
       <div className="fdp-conflict-text">

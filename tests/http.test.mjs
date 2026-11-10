@@ -4,8 +4,8 @@ import { Readable } from 'node:stream';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { createHandler } from '../lib/rpc.js';
-import { registerFilesRoute } from '../lib/http.js';
+import { createHandler } from '../dist/host/lib/rpc.js';
+import { registerFilesRoute } from '../dist/host/lib/http.js';
 
 let route;
 let root;
