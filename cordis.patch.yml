@@ -1,0 +1,4 @@
+- insert:
+    - id: dsh-files-desk
+      name: 'dsh-files-desk'
+      config: {}
