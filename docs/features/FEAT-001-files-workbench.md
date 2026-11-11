@@ -6,7 +6,7 @@ status: active
 implementation_status: shipped_verified
 owner: Parth Patel
 created: 2026-11-10
-last_updated: 2026-11-10
+last_updated: 2026-11-11
 last_verified_commit: null
 version: 0.1.0
 tags:
@@ -636,6 +636,10 @@ The plugin is a local package linked into the `web` profile. Deployment is `plug
 - The tree factory and tab registry are external contracts. Do not read their DOM or copy their internals.
 - Writes stay inside the workspace root. Do not add a bypass for convenience.
 - Run `npm test` and `npm run build` before claiming a change is complete.
+
+## Package logo
+
+Release 0.1.1 supplies the approved teal folder-and-document artwork through the existing `./icon` export. [icon.svg](../../icon.svg) embeds the original PNG so the package needs no external image URL. Sidebar and editor action icons are unchanged. Verify that `npm pack --dry-run` includes the icon and that the package and root lockfile versions match before publishing.
 
 ## 30. Changelog
 
