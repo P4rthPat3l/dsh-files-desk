@@ -497,6 +497,7 @@ No metrics or telemetry. Failures surface as inline messages and the route's str
 | Client bundle | Loader format, takeover registration, address builder, canOpen, dictionary parity | `tests/client.test.mjs` | 4 pass |
 | Editor chunk | jsdom render, edit, cursor, read-only, destroy | `tests/editor.test.mjs` | 2 pass |
 | Workbench | Mount, root listing, empty state, CodeMirror in the editor tab, menu wiring | `tests/workbench.test.mjs` | 3 pass |
+| Package icon | `./icon` export exists, allowed type, at most 256 KiB for the harness metadata cap | `tests/icon.test.mjs` | 1 pass |
 | Static | Built-bundle syntax and design detector | `npm run build`, Impeccable detector | Clean |
 
 Acceptance criterion coverage:
@@ -639,7 +640,11 @@ The plugin is a local package linked into the `web` profile. Deployment is `plug
 
 ## Package logo
 
-Release 0.1.1 supplies the approved teal folder-and-document artwork through the existing `./icon` export. [icon.svg](../../icon.svg) embeds the original PNG so the package needs no external image URL. Sidebar and editor action icons are unchanged. Verify that `npm pack --dry-run` includes the icon and that the package and root lockfile versions match before publishing.
+The teal folder-and-document artwork is served through the `./icon` export as [icon.svg](../../icon.svg), a hand-written vector. The harness reads that export to build plugin metadata, and it admits only SVG, PNG, JPEG, or WebP files of at most 256 KiB (`MAX_ICON_BYTES` in the harness manifest reader). An icon over the cap produces `Package metadata error: … icon exceeds 256 KiB` on the Components page while the plugin keeps running, so the size limit is a release blocker, not a cosmetic one.
+
+The 0.1.1 tarball broke that rule: its `icon.svg` was a wrapper around the original 1312×1199 PNG encoded as base64, 1,571,920 bytes in total. The current file is a ~660-byte vector with the same navy outline, teal folder, white sheet, and folded corner.
+
+Two checks keep it that way. `npm test` runs `PKG-001`, and `prepack` runs [scripts/check-icon.mjs](../../scripts/check-icon.mjs), which reads every icon export from `package.json`, checks the extension and byte size, and fails packaging when the icon is too large. Version 0.1.2 ships the fix, so the installed profile can move off the oversized 0.1.1 icon. Sidebar and editor action icons are unchanged.
 
 ## 30. Changelog
 
@@ -647,6 +652,7 @@ Release 0.1.1 supplies the approved teal folder-and-document artwork through the
 | --- | --- | --- | --- | --- |
 | 2026-11-10 | 0.1.0 | Host route, file operations, workbench, editor chunk, menus, and Git open-at-line implemented; 33 tests pass; live pass found and fixed the breadcrumb slash and the Git handler scope | Shipped and live verified (no commit) | Parth Patel |
 | 2026-11-10 | 0.2.0 | Sources moved to TypeScript: `src/host/` compiles to `dist/` with `tsc`, the shared wire contract lives in `src/contract.ts`, and the client keeps its esbuild bundle; `npm run typecheck` added | Implemented, 33 tests pass | Parth Patel |
+| 2026-11-11 | 0.1.2 | Replaced the 1.5 MB SVG-wrapped PNG icon with a 660-byte vector and added the `PKG-001` test plus the `prepack` icon check for the harness 256 KiB metadata cap | Implemented, tests pass | Parth Patel |
 
 ## 31. Related Resources
 

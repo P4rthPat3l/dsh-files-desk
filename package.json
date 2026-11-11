@@ -1,6 +1,6 @@
 {
   "name": "dsh-files-desk",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "description": "Files workbench for DeepSeek Harness: a right-sidebar workspace tree, a CodeMirror editor with versioned saves, file operations, and handoff to the document preview.",
   "keywords": [
@@ -53,7 +53,8 @@
   "scripts": {
     "build": "rm -rf dist && tsc -p src/host/tsconfig.json && node scripts/build.mjs",
     "typecheck": "tsc -p src/host/tsconfig.json --noEmit && tsc -p src/client/tsconfig.json",
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test tests/*.test.mjs",
+    "prepack": "node scripts/check-icon.mjs"
   },
   "devDependencies": {
     "@codemirror/commands": "^6.8.1",
