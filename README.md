@@ -2,6 +2,8 @@
 
 A Files tab in the Harness right sidebar that browses the session workspace, edits files in a CodeMirror editor, saves them with a conflict check, manages files from shared context menus, and hands documents to the shipped preview.
 
+![Files workbench open in the right sidebar](docs/images/workbench.png)
+
 ## What it does
 
 - Takes over the built-in `files` tab kind, so Mod+P, the Files guide card, and the tab strip open the workbench.
@@ -22,6 +24,22 @@ Open the app's Plugin manager, choose to install a local bundle, and point it at
 1. Reload the window once (Ctrl+R in the desktop app).
 2. Press Mod+P, or pick the Files card in the right sidebar Start guide.
 3. Expand a folder and click a text file. Images, PDF, Office files, and archives open the preview instead.
+
+## Screenshots
+
+Captured from the web GUI on 2026-11-12.
+
+Text files open in the CodeMirror editor with the workspace tree beside them.
+
+![Workspace tree and CodeMirror editor](docs/images/editor.png)
+
+Markdown, HTML, images, CSV, Office, and PDF keep the shipped preview. The preview keeps an Edit path back to the editor.
+
+![Markdown preview of this README](docs/images/markdown-preview.png)
+
+File actions come from the shared file and directory context menus, so the plugin adds no new menu style.
+
+![File actions from the shared context menu](docs/images/file-actions.png)
 
 ## Architecture
 
