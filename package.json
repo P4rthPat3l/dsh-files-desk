@@ -1,6 +1,6 @@
 {
   "name": "dsh-files-desk",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "type": "module",
   "description": "Files workbench for DeepSeek Harness: a right-sidebar workspace tree, a CodeMirror editor with versioned saves, file operations, and handoff to the document preview.",
   "keywords": [
